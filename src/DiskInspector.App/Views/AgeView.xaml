@@ -1,0 +1,34 @@
+<UserControl x:Class="DiskInspector.App.Views.AgeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DiskInspector.App.ViewModels"
+             xmlns:c="clr-namespace:DiskInspector.App.Controls">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="900" HorizontalAlignment="Left">
+            <TextBlock Text="Space by age" Style="{StaticResource Heading}" />
+            <TextBlock Style="{StaticResource Muted}" Margin="0,0,0,16"
+                       Text="Files grouped by when they last changed. Large amounts of old data are often good candidates to archive or clean up. Use Largest files with an age filter to see them." />
+            <ItemsControl ItemsSource="{Binding Rows}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:AgeRow">
+                        <Grid Margin="0,0,0,14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="160" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="210" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding Label}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <c:ProportionBar Grid.Column="1" Value="{Binding Fraction}" Height="18" VerticalAlignment="Center" MinWidth="200" />
+                            <TextBlock Grid.Column="2" Margin="12,0,0,0" VerticalAlignment="Center">
+                                <Run Text="{Binding SizeText, Mode=OneWay}" FontWeight="SemiBold" />
+                                <Run Text="{Binding PercentText, Mode=OneWay}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <LineBreak />
+                                <Run Text="{Binding CountText, Mode=OneWay}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            </TextBlock>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

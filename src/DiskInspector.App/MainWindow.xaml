@@ -1,0 +1,180 @@
+<Window x:Class="DiskInspector.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:DiskInspector.App.ViewModels"
+        xmlns:v="clr-namespace:DiskInspector.App.Views"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance vm:MainViewModel}"
+        Title="{Binding WindowTitle}"
+        Icon="Assets/DiskInspector.ico"
+        Width="1440" Height="900" MinWidth="1000" MinHeight="620"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Toolbar -->
+        <Border Grid.Row="0" Padding="12,8" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" MinWidth="120" MaxWidth="420" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <ComboBox Width="180" ItemsSource="{Binding Drives}" SelectedItem="{Binding SelectedDrive}"
+                              IsEnabled="{Binding IsScanning, Converter={x:Static v:Not.Instance}}" ToolTip="Drive to scan">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate DataType="vm:DriveItem">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Icon}" Text="&#xEDA2;" Margin="0,0,8,0" />
+                                    <TextBlock Text="{Binding Title}" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </StackPanel>
+                <TextBox Grid.Column="1" Margin="8,0,0,0" Text="{Binding TargetPath, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center"
+                             IsEnabled="{Binding IsScanning, Converter={x:Static v:Not.Instance}}" ToolTip="Drive or folder to scan" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button Margin="4,0,0,0" Command="{Binding BrowseCommand}" ToolTip="Choose a folder"
+                            IsEnabled="{Binding IsScanning, Converter={x:Static v:Not.Instance}}">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xED25;" />
+                    </Button>
+                    <Button Margin="12,0,0,0" Command="{Binding ScanCommand}" Style="{DynamicResource AccentButtonStyle}" MinWidth="96">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE721;" Margin="0,0,8,0" />
+                            <TextBlock Text="Scan" />
+                        </StackPanel>
+                    </Button>
+                    <Button Margin="6,0,0,0" Command="{Binding FastScanCommand}"
+                            ToolTip="Reads the NTFS file table directly: much faster and includes protected folders. Needs administrator rights (Windows will ask). Whole NTFS drives only.">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xEA18;" Margin="0,0,8,0" />
+                            <TextBlock Text="{Binding FastScanLabel}" />
+                        </StackPanel>
+                    </Button>
+                    <Button Margin="6,0,0,0" Command="{Binding CancelCommand}" Visibility="{Binding IsScanning, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE711;" Margin="0,0,8,0" />
+                            <TextBlock Text="Cancel" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="8,0,0,0" Visibility="{Binding IsDone, Converter={StaticResource BoolToVis}}">
+                    <ToggleButton IsChecked="{Binding UseAllocated}" Margin="0,0,6,0"
+                                  ToolTip="Off: file sizes (like Explorer's Size). On: space actually used on the drive (Size on disk).">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE9F9;" Margin="0,0,8,0" />
+                            <TextBlock Text="Size on disk" />
+                        </StackPanel>
+                    </ToggleButton>
+                    <Button x:Name="ExportButton" Click="ExportButton_Click" Margin="0,0,6,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xEDE1;" Margin="0,0,8,0" />
+                            <TextBlock Text="Export" />
+                        </StackPanel>
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="All folders (CSV)" Command="{Binding ExportCommand}" CommandParameter="folders" />
+                                <MenuItem Header="File types (CSV)" Command="{Binding ExportCommand}" CommandParameter="types" />
+                                <MenuItem Header="Largest files list (CSV)" Command="{Binding ExportCommand}" CommandParameter="files" />
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+                    <Button Command="{Binding NewScanCommand}" ToolTip="Back to the start page">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE80F;" Margin="0,0,8,0" />
+                            <TextBlock Text="New scan" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Notice bar (fast scan fallback, ignored settings file) -->
+        <Border Grid.Row="1" Margin="12,8,12,0" Padding="12,8" CornerRadius="6"
+                Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                Visibility="{Binding HasNotice, Converter={StaticResource BoolToVis}}">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Padding="6,2" Click="DismissNotice_Click" ToolTip="Dismiss">
+                    <TextBlock Style="{StaticResource Icon}" Text="&#xE711;" FontSize="12" />
+                </Button>
+                <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" Margin="0,0,10,0" />
+                <TextBlock Text="{Binding Notice}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+
+        <!-- Start page -->
+        <v:StartView Grid.Row="2" Visibility="{Binding IsStart, Converter={StaticResource BoolToVis}}" />
+
+        <!-- Scanning -->
+        <Grid Grid.Row="2" Visibility="{Binding IsScanning, Converter={StaticResource BoolToVis}}">
+            <Border Style="{StaticResource Card}" Width="620" VerticalAlignment="Center" HorizontalAlignment="Center" Padding="28">
+                <StackPanel>
+                    <TextBlock Text="{Binding ProgressHeadline}" Style="{StaticResource Heading}" TextTrimming="CharacterEllipsis" />
+                    <ProgressBar Height="6" Margin="0,14,0,14" IsIndeterminate="{Binding ProgressIndeterminate}" Value="{Binding ProgressValue}" Maximum="100" />
+                    <TextBlock Text="{Binding ProgressDetail}" FontSize="14" />
+                    <TextBlock Text="{Binding ProgressPath}" Style="{StaticResource Muted}" Margin="0,6,0,0" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Style="{StaticResource Muted}" Margin="0,16,0,0"
+                               Text="The scan only reads folder listings. It never opens, changes or downloads your files." />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Results -->
+        <Grid Grid.Row="2" Visibility="{Binding IsDone, Converter={StaticResource BoolToVis}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="190" />
+                <ColumnDefinition Width="*" MinWidth="400" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="320" MinWidth="220" />
+            </Grid.ColumnDefinitions>
+
+            <ListBox Grid.Column="0" Margin="8,10,4,10" ItemsSource="{Binding Views}" SelectedIndex="{Binding SelectedViewIndex}"
+                     BorderThickness="0" Background="Transparent">
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="vm:NavItem">
+                        <StackPanel Orientation="Horizontal" Margin="2,6" ToolTip="{Binding Hint}">
+                            <TextBlock Style="{StaticResource Icon}" Text="{Binding Glyph}" Margin="0,0,12,0" />
+                            <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Only the selected view is in the window (see MainWindow.ShowView): hidden views with thousands of
+                 rows would otherwise still be walked by layout and by accessibility clients. -->
+            <ContentControl x:Name="ViewsHost" Grid.Column="1" Margin="4,10,4,10" Focusable="False" />
+
+            <GridSplitter Grid.Column="2" Width="5" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" ResizeBehavior="PreviousAndNext" />
+
+            <v:DetailsPanel Grid.Column="3" Margin="4,10,10,10" />
+        </Grid>
+
+        <!-- Status bar -->
+        <Border Grid.Row="3" Padding="12,6" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Padding="8,2" Click="ShowIssues_Click"
+                        Visibility="{Binding Issues, Converter={StaticResource NotEmptyToVis}}" ToolTip="Folders that could not be read">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE72E;" FontSize="12" Margin="0,0,6,0" />
+                        <TextBlock Text="Inaccessible" FontSize="12" />
+                    </StackPanel>
+                </Button>
+                <TextBlock Text="{Binding StatusText}" Style="{StaticResource Muted}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

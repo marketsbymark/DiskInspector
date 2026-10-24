@@ -1,0 +1,93 @@
+<UserControl x:Class="DiskInspector.App.Views.CategoriesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DiskInspector.App.ViewModels"
+             xmlns:c="clr-namespace:DiskInspector.App.Controls">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="3*" MinWidth="260" />
+            <ColumnDefinition Width="2*" MinWidth="200" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Categories -->
+        <DockPanel Grid.Row="0" Grid.Column="0" Margin="0,0,12,12">
+            <TextBlock DockPanel.Dock="Top" Text="Categories" Style="{StaticResource SubHeading}" />
+            <c:DonutChart DockPanel.Dock="Left" Width="190" Height="190" VerticalAlignment="Top" Margin="0,0,12,0"
+                          Slices="{Binding Slices}" CenterText="{Binding SelectedCategory.SizeText}" CenterSubText="{Binding SelectedCategory.Name}" />
+            <ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedCategory}" HorizontalContentAlignment="Stretch"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="vm:CategoryRow">
+                        <Grid Margin="0,3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Border Style="{StaticResource Swatch}" Background="{Binding Brush}" />
+                            <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="SemiBold" />
+                            <TextBlock Grid.Column="2" Margin="8,0,0,0">
+                                <Run Text="{Binding SizeText, Mode=OneWay}" FontWeight="SemiBold" />
+                                <Run Text="{Binding PercentText, Mode=OneWay}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            </TextBlock>
+                            <c:ProportionBar Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Value="{Binding Fraction}" Fill="{Binding Brush}" Height="5" Margin="0,4,0,0" />
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DockPanel>
+
+        <!-- Extensions of the selected category -->
+        <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,12">
+            <TextBlock DockPanel.Dock="Top" Style="{StaticResource SubHeading}">
+                <Run Text="Types in " /><Run Text="{Binding SelectedCategory.Name, Mode=OneWay}" />
+            </TextBlock>
+            <ListView ItemsSource="{Binding Extensions}" SelectedItem="{Binding SelectedExtension}" c:GridViewSort.Enabled="True">
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Header="Type" Width="110" DisplayMemberBinding="{Binding Extension}" c:GridViewSort.Property="Extension" />
+                        <GridViewColumn Header="Size" Width="90" c:GridViewSort.Property="Size">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate DataType="vm:ExtensionRow">
+                                    <TextBlock Text="{Binding SizeText}" HorizontalAlignment="Right" />
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Of category" Width="80" DisplayMemberBinding="{Binding PercentText}" c:GridViewSort.Property="Fraction" />
+                        <GridViewColumn Header="Files" Width="80" DisplayMemberBinding="{Binding CountText}" c:GridViewSort.Property="Count" />
+                    </GridView>
+                </ListView.View>
+            </ListView>
+        </DockPanel>
+
+        <!-- Largest files of the category or extension -->
+        <DockPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2">
+            <TextBlock DockPanel.Dock="Top" Text="{Binding FilesTitle}" Style="{StaticResource SubHeading}" />
+            <ListView ItemsSource="{Binding Files}" SelectedItem="{Binding SelectedFile}" c:GridViewSort.Enabled="True"
+                      VirtualizingPanel.IsVirtualizing="True" ContextMenu="{StaticResource NodeMenu}">
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Header="Name" Width="300" DisplayMemberBinding="{Binding Name}" c:GridViewSort.Property="Name" />
+                        <GridViewColumn Header="Size" Width="90" c:GridViewSort.Property="Size">
+                            <GridViewColumn.CellTemplate>
+                                <DataTemplate DataType="vm:FileRow">
+                                    <TextBlock Text="{Binding SizeText}" HorizontalAlignment="Right" />
+                                </DataTemplate>
+                            </GridViewColumn.CellTemplate>
+                        </GridViewColumn>
+                        <GridViewColumn Header="Modified" Width="130" DisplayMemberBinding="{Binding ModifiedText}" c:GridViewSort.Property="Modified" />
+                        <GridViewColumn Header="Folder" Width="520" DisplayMemberBinding="{Binding Folder}" c:GridViewSort.Property="Folder" />
+                    </GridView>
+                </ListView.View>
+            </ListView>
+        </DockPanel>
+    </Grid>
+</UserControl>

@@ -1,0 +1,80 @@
+<UserControl x:Class="DiskInspector.App.Views.TypesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DiskInspector.App.ViewModels"
+             xmlns:c="clr-namespace:DiskInspector.App.Controls">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="240" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Margin="0,0,16,0">
+            <TextBlock Text="By category" Style="{StaticResource SubHeading}" />
+            <c:DonutChart Slices="{Binding Slices}" CenterText="{Binding Summary}" CenterSubText="file types" Height="220" />
+            <TextBlock Style="{StaticResource Muted}" Margin="0,12,0,0"
+                       Text="Click a column header to sort. Selecting a type shows its largest file on the right." />
+        </StackPanel>
+
+        <ListView Grid.Column="1" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" c:GridViewSort.Enabled="True"
+                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ContextMenu="{StaticResource NodeMenu}">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Type" Width="150" c:GridViewSort.Property="Extension">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:ExtensionRow">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Style="{StaticResource Swatch}" Background="{Binding CategoryBrush}" />
+                                    <TextBlock Text="{Binding Extension}" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Category" Width="150" DisplayMemberBinding="{Binding Category}" c:GridViewSort.Property="Category" />
+                    <GridViewColumn Header="Size" Width="95" c:GridViewSort.Property="Size">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:ExtensionRow">
+                                <TextBlock Text="{Binding SizeText}" HorizontalAlignment="Right" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Share" Width="140" c:GridViewSort.Property="Fraction">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:ExtensionRow">
+                                <Grid Width="120">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="46" />
+                                    </Grid.ColumnDefinitions>
+                                    <c:ProportionBar Value="{Binding Fraction}" Fill="{Binding CategoryBrush}" Height="8" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{Binding PercentText}" HorizontalAlignment="Right" FontSize="12" />
+                                </Grid>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="On disk" Width="95" c:GridViewSort.Property="Allocated">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:ExtensionRow">
+                                <TextBlock Text="{Binding AllocatedText}" HorizontalAlignment="Right" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Files" Width="90" c:GridViewSort.Property="Count">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:ExtensionRow">
+                                <TextBlock Text="{Binding CountText}" HorizontalAlignment="Right" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Average" Width="95" c:GridViewSort.Property="Average">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:ExtensionRow">
+                                <TextBlock Text="{Binding AverageText}" HorizontalAlignment="Right" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                </GridView>
+            </ListView.View>
+        </ListView>
+    </Grid>
+</UserControl>

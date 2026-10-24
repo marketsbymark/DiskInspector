@@ -1,0 +1,78 @@
+<UserControl x:Class="DiskInspector.App.Views.FoldersView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DiskInspector.App.ViewModels"
+             xmlns:c="clr-namespace:DiskInspector.App.Controls">
+    <DockPanel>
+        <TextBlock DockPanel.Dock="Top" Style="{StaticResource Muted}" Margin="2,0,0,8"
+                   Text="Folders sorted by size. Click the arrow or double-click a folder to open it. Use the Left and Right arrow keys to collapse and expand." />
+        <ListView x:Name="List" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" SelectionMode="Single"
+                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Item"
+                  ContextMenu="{StaticResource NodeMenu}" MouseDoubleClick="List_MouseDoubleClick" PreviewKeyDown="List_PreviewKeyDown"
+                  SelectionChanged="List_SelectionChanged">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Name" Width="360">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:FolderRow">
+                                <StackPanel Orientation="Horizontal" Margin="{Binding Level, Converter={StaticResource LevelToIndent}}">
+                                    <Button Width="22" Height="22" Padding="0" Background="Transparent" BorderThickness="0" Focusable="False"
+                                            Command="{Binding DataContext.ToggleCommand, RelativeSource={RelativeSource AncestorType=ListView}}"
+                                            CommandParameter="{Binding}">
+                                        <TextBlock Style="{StaticResource Icon}" Text="{Binding ExpanderGlyph}" FontSize="10" />
+                                    </Button>
+                                    <TextBlock Style="{StaticResource Icon}" Text="{Binding Glyph}" Foreground="{Binding Brush}" Margin="2,0,8,0" />
+                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Badge}" Style="{StaticResource Muted}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Size" Width="95">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:FolderRow">
+                                <TextBlock Text="{Binding SizeText}" HorizontalAlignment="Right" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="% of parent" Width="140">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:FolderRow">
+                                <Grid Width="120">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="46" />
+                                    </Grid.ColumnDefinitions>
+                                    <c:ProportionBar Value="{Binding Fraction}" Fill="{Binding Brush}" Height="8" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{Binding PercentText}" HorizontalAlignment="Right" FontSize="12" />
+                                </Grid>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="On disk" Width="95">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:FolderRow">
+                                <TextBlock Text="{Binding AllocatedText}" HorizontalAlignment="Right" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Files" Width="85">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:FolderRow">
+                                <TextBlock Text="{Binding FilesText}" HorizontalAlignment="Right" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Folders" Width="75">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate DataType="vm:FolderRow">
+                                <TextBlock Text="{Binding FoldersText}" HorizontalAlignment="Right" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Modified" Width="140" DisplayMemberBinding="{Binding ModifiedText}" />
+                </GridView>
+            </ListView.View>
+        </ListView>
+    </DockPanel>
+</UserControl>
