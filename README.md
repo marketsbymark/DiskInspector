@@ -4,12 +4,17 @@ A Windows 11 desktop app that shows what is using space on a drive or folder.
 
 ## Run
 
-`publish\DiskInspector.exe` is a single self-contained file (no .NET install needed). Pick a drive and press **Scan**.
+This repository contains the source, not a checked-in executable. Build and
+publish it using the instructions below, then launch `publish\DiskInspector.exe`.
+The published app is self-contained, so the target computer does not need a
+separate .NET runtime. Pick a drive or folder and press **Scan**.
 
-- **Scan**: works without admin rights. A full C:\ takes a few seconds once Windows has the folder listings cached; the first scan after a reboot takes longer. Protected folders are skipped and listed under **Inaccessible**.
-- **Fast scan**: reads the NTFS file table directly. It sees protected folders and counts hard-linked files once. Windows asks for administrator permission. If it can't run, the normal scan is used and a notice explains why.
+- **Scan**: works without admin rights. Scan time depends on the drive, file count, permissions and Windows filesystem caches. Protected folders are skipped and listed under **Inaccessible**.
+- **Fast scan**: reads the NTFS file table directly for a whole NTFS drive (not an individual folder). It sees protected folders and counts hard-linked files once. Windows asks for administrator permission. If it can't run, the normal scan is used and a notice explains why.
 
-The app only reads the disk. The actions are Open (turned off for programs and scripts), Show in File Explorer and Copy path.
+Scanning is read-only: the app does not delete or move the files it scans. It does
+write its own logs and any CSV exports you request. The file actions are Open
+(turned off for programs and scripts), Show in File Explorer and Copy path.
 
 ## Views
 
@@ -38,9 +43,15 @@ If the file is broken, the app ignores it and shows a notice.
 
 ## Logs
 
-`%LOCALAPPDATA%\DiskInspector\logs\`. Unexpected errors are logged and shown in a dialog. The app keeps running.
+Logs are written under `%LOCALAPPDATA%\DiskInspector\logs\`. UI errors may also
+show a dialog; unhandled process-level errors can terminate the application.
 
 ## Build and test
+
+Use Windows with the **.NET 10 SDK** installed: the app, core library and tests
+all target `net10.0-windows`, and the desktop UI uses WPF. Run the commands from
+the repository root. Package restore requires access to the configured NuGet
+sources on the first build.
 
 ```bash
 dotnet test tests/DiskInspector.Core.Tests
