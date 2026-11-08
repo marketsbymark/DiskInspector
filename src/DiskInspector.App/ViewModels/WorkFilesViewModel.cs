@@ -10,13 +10,17 @@ using DiskInspector.Core.Model;
 namespace DiskInspector.App.ViewModels;
 
 /// <summary>
-/// Tables of work files (Excel, Word, PowerPoint, PDF, email, Markdown, notebooks, Python, DBC Finance...)
-/// with location, dates and author, for everything scanned or one folder.
+/// Tables of work files (Excel, Word, PowerPoint, PDF, email, Markdown, notebooks, Python, DBC Finance, AI assistants...)
+/// with location, dates and author, for everything scanned or one folder. "Any types or all files" lists the extensions the
+/// user types, or every file.
 /// </summary>
 public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSource, ISortableTable
 {
-    /// <summary>More rows than this are not shown at once (the largest files are kept).</summary>
+    /// <summary>More rows than this are not shown at once (the largest files are kept; snapshots still include every file).</summary>
     public const int MaxRows = 100_000;
+
+    /// <summary>Most extensions offered in the Types list for a group that can hold any type.</summary>
+    const int MaxTypeOptions = 300;
 
     static readonly string[] Headers =
     [
@@ -29,16 +33,24 @@ public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSour
     CancellationTokenSource? _queryCts;
     CancellationTokenSource? _authorCts;
     bool _loading;
+    long[]? _allCounts;                                   // every file in scope, by extension id
+    Dictionary<string, long[]> _ruleCounts = [];          // matching files by extension id, for name/folder groups
+    QueryResult? _last;
 
     public WorkFilesViewModel(MainViewModel main)
     {
         Main = main;
         GroupDefinitions = WorkFiles.LoadGroups();
         _onlyUserFolders = main.Settings.OnlyUserFolders;
-        _debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _debounce.Tick += (_, _) =>
         {
             _debounce.Stop();
+            if (_customChanged)
+            {
+                _customChanged = false;
+                RebuildTypes();
+            }
             Requery();
         };
     }
@@ -50,6 +62,7 @@ public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSour
     private IReadOnlyList<WorkGroupOption> _groups = [];
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsCustomGroup))]
     private WorkGroupOption? _selectedGroup;
 
     [ObservableProperty]
@@ -60,6 +73,17 @@ public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSour
 
     [ObservableProperty]
     private string _nameFilter = "";
+
+    /// <summary>Extensions for "Any types or all files", e.g. "json, toml, sql". Empty or * means every file.</summary>
+    [ObservableProperty]
+    private string _customTypes = "";
+
+    bool _customChanged;
+
+    public bool IsCustomGroup => SelectedGroup?.Group.IsCustom == true;
+
+    /// <summary>How many files match, including any the table leaves out because there are too many to show.</summary>
+    public int FoundCount => _last?.Found ?? 0;
 
     [ObservableProperty]
     private bool _onlyUserFolders;
@@ -87,6 +111,7 @@ public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSour
     {
         _a = a;
         _authorCts?.Cancel();
+        _last = null;
         if (a is null)
         {
             Groups = [];
@@ -107,39 +132,70 @@ public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSour
         string? keepGroup = keepSelection ? SelectedGroup?.Group.Key : null;
         int root = Main.Scope?.Root ?? ScanTree.RootId;
         bool only = OnlyUserFolders;
+        var ruleGroups = GroupDefinitions.Where(g => g.HasRules).ToList();
         IsBusy = true;
-        Task.Run(() => WorkFiles.CountByExtension(a.Tree, root, only)).ContinueWith(t =>
+        Task.Run(() =>
+        {
+            var all = WorkFiles.CountByExtension(a.Tree, root, only);
+            var rules = new Dictionary<string, long[]>();
+            foreach (var g in ruleGroups)
+                rules[g.Key] = WorkFiles.CountByExtension(a.Tree, FileMatcher.ForGroup(a.Tree, g), root, only);
+            return (all, rules);
+        }).ContinueWith(t =>
         {
             if (_a != a || t.Status != TaskStatus.RanToCompletion)
                 return;
-            var counts = t.Result;
-            long Count(WorkFileGroup g) => g.Extensions.Sum(e => a.Tree.Extensions.TryGetId(e, out ushort id) ? counts[id] : 0);
+            (_allCounts, _ruleCounts) = t.Result;
             _loading = true;
-            Groups = GroupDefinitions.Select(g => new WorkGroupOption(g, Count(g))).ToList();
+            Groups = GroupDefinitions.Select(g => new WorkGroupOption(g, g.IsCustom ? -1 : CountsFor(g).Sum())).ToList();
             SelectedGroup = Groups.FirstOrDefault(g => g.Group.Key == keepGroup) ?? Groups.FirstOrDefault(g => g.Group.Key == "excel") ?? Groups.FirstOrDefault();
             _loading = false;
-            RebuildTypes(counts);
+            RebuildTypes();
             Requery();
         }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
-    long[]? _lastCounts;
-
-    void RebuildTypes(long[]? counts = null)
+    /// <summary>Matching files by extension id for <paramref name="g"/> in the current scope.</summary>
+    long[] CountsFor(WorkFileGroup g)
     {
-        counts ??= _lastCounts;
-        _lastCounts = counts;
+        var all = _allCounts ?? [];
+        if (g.HasRules)
+            return _ruleCounts.TryGetValue(g.Key, out var c) ? c : new long[all.Length];
+        var exts = g.IsCustom ? WorkFiles.ParseExtensions(CustomTypes) : g.Extensions;
+        if (g.IsCustom && exts.Count == 0)
+            return all;
+        var result = new long[all.Length];
+        if (_a is { } a)
+            foreach (var e in exts)
+                if (a.Tree.Extensions.TryGetId(e, out ushort id) && id < all.Length)
+                    result[id] = all[id];
+        return result;
+    }
+
+    void RebuildTypes()
+    {
         var a = _a;
-        if (a is null || SelectedGroup is null || counts is null)
+        if (a is null || SelectedGroup is null || _allCounts is null)
             return;
-        string? keep = SelectedType?.Extension;
+        var group = SelectedGroup.Group;
+        var counts = CountsFor(group);
+        TypeOption? keep = SelectedType;
         _loading = true;
-        var options = new List<TypeOption> { new("All types in group", "") };
-        foreach (var e in SelectedGroup.Group.Extensions)
-            if (a.Tree.Extensions.TryGetId(e, out ushort id) && counts[id] > 0)
-                options.Add(new TypeOption($".{e} ({counts[id]:N0})", e));
+        var options = new List<TypeOption> { TypeOption.All(group.IsCustom ? "All matching types" : "All types in group") };
+        if (group.HasRules || group.IsCustom)
+        {
+            // Any extension can turn up: offer the ones found, most common first.
+            options.AddRange(Enumerable.Range(0, counts.Length).Where(i => counts[i] > 0).OrderByDescending(i => counts[i]).Take(MaxTypeOptions)
+                .Select(i => TypeOption.For((ushort)i, a.Tree.Extensions[(ushort)i], counts[i])));
+        }
+        else
+        {
+            foreach (var e in group.Extensions)
+                if (a.Tree.Extensions.TryGetId(e, out ushort id) && counts[id] > 0)
+                    options.Add(TypeOption.For(id, e, counts[id]));
+        }
         Types = options;
-        SelectedType = options.FirstOrDefault(o => o.Extension == keep) ?? options[0];
+        SelectedType = options.FirstOrDefault(o => keep is not null && o.ExtensionId == keep.ExtensionId) ?? options[0];
         _loading = false;
     }
 
@@ -163,6 +219,15 @@ public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSour
         _debounce.Start();
     }
 
+    partial void OnCustomTypesChanged(string value)
+    {
+        if (!IsCustomGroup)
+            return;
+        _customChanged = true;
+        _debounce.Stop();
+        _debounce.Start();
+    }
+
     partial void OnOnlyUserFoldersChanged(bool value) => RefreshGroups(keepSelection: true);
 
     partial void OnSelectedRowChanged(WorkFileRow? value)
@@ -171,9 +236,12 @@ public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSour
             Main.SelectedNode = value.Node;
     }
 
-    /// <summary>Extensions the table currently shows.</summary>
-    IReadOnlyList<string> CurrentExtensions() =>
-        SelectedType is { Extension.Length: > 0 } t ? [t.Extension] : SelectedGroup?.Group.Extensions ?? [];
+    /// <summary>Which files the table currently shows.</summary>
+    FileMatcher CurrentMatcher(ScanTree tree)
+    {
+        var group = SelectedGroup!.Group;
+        return group.IsCustom ? FileMatcher.ForExtensions(tree, WorkFiles.ParseExtensions(CustomTypes)) : FileMatcher.ForGroup(tree, group);
+    }
 
     void Requery()
     {
@@ -183,12 +251,13 @@ public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSour
         _queryCts?.Cancel();
         _authorCts?.Cancel();
         var cts = _queryCts = new CancellationTokenSource();
-        var exts = CurrentExtensions();
+        var matcher = CurrentMatcher(a.Tree);
+        int type = SelectedType?.ExtensionId ?? -1;
         int root = Main.Scope?.Root ?? ScanTree.RootId;
         bool only = OnlyUserFolders;
         string name = NameFilter.Trim();
         IsBusy = true;
-        Task.Run(() => BuildRows(a, exts, root, only, name, cts.Token), cts.Token).ContinueWith(t =>
+        Task.Run(() => BuildRows(a, matcher, type, root, only, name, cts.Token), cts.Token).ContinueWith(t =>
         {
             if (cts.IsCancellationRequested || _a != a)
                 return;
@@ -199,37 +268,58 @@ public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSour
                     Log.Error("Work files query failed", t.Exception);
                 return;
             }
-            var (rows, found, bytes) = t.Result;
-            Rows = rows;
-            int online = rows.Count(r => r.IsOnlineOnly);
-            Summary = found == 0 ? "No matching files"
-                : $"{found:N0} files, {Format.Bytes(bytes)}" + (online > 0 ? $" · {online:N0} online-only" : "")
-                  + (found > rows.Count ? $" · showing the largest {rows.Count:N0}" : "");
+            var r = _last = t.Result;
+            Rows = r.Rows;
+            int online = r.Rows.Count(x => x.IsOnlineOnly);
+            Summary = r.Found == 0 ? "No matching files"
+                : $"{r.Found:N0} files, {Format.Bytes(r.Bytes)}" + (online > 0 ? $" · {online:N0} online-only" : "")
+                  + (r.Found > r.Rows.Count ? $" · showing the largest {r.Rows.Count:N0} (Snapshot table saves all {r.Found:N0})" : "");
             StartAutoAuthors();
         }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
-    static (List<WorkFileRow> Rows, int Found, long Bytes) BuildRows(Analysis a, IReadOnlyList<string> exts, int root, bool only, string name, CancellationToken ct)
+    /// <summary>The rows to show plus, when there are too many to show, the rest (smaller files) for snapshots.</summary>
+    sealed record QueryResult(List<WorkFileRow> Rows, int[] Hidden, int Found, long Bytes);
+
+    static QueryResult BuildRows(Analysis a, FileMatcher matcher, int extensionId, int root, bool only, string name, CancellationToken ct)
     {
         var tree = a.Tree;
-        var mask = WorkFiles.ExtensionMask(tree, exts);
-        var nodes = WorkFiles.Find(tree, mask, root, only,
-            name.Length == 0 ? null : i => tree.Name(i).Contains(name, StringComparison.OrdinalIgnoreCase), ct);
-        long bytes = nodes.Sum(tree.Size);
+        Func<int, bool>? filter = (extensionId, name.Length) switch
+        {
+            ( < 0, 0) => null,
+            ( < 0, _) => i => tree.Name(i).Contains(name, StringComparison.OrdinalIgnoreCase),
+            (_, 0) => i => tree.ExtensionId(i) == extensionId,
+            _ => i => tree.ExtensionId(i) == extensionId && tree.Name(i).Contains(name, StringComparison.OrdinalIgnoreCase),
+        };
+        var nodes = WorkFiles.Find(tree, matcher, root, only, filter, ct);
+        long bytes = 0;
+        foreach (int n in nodes)
+            bytes += tree.Size(n);
         int found = nodes.Count;
+        int[] hidden = [];
         if (nodes.Count > MaxRows)
-            nodes = nodes.OrderByDescending(tree.Size).Take(MaxRows).ToList();
+        {
+            nodes.Sort((x, y) => tree.Size(y).CompareTo(tree.Size(x)));     // largest first
+            hidden = nodes.GetRange(MaxRows, nodes.Count - MaxRows).ToArray();
+            nodes.RemoveRange(MaxRows, nodes.Count - MaxRows);
+        }
         else
+        {
             nodes.Sort((x, y) => tree.ModifiedTicks(y).CompareTo(tree.ModifiedTicks(x)));   // newest first
+        }
+        ct.ThrowIfCancellationRequested();
         var rows = new List<WorkFileRow>(nodes.Count);
         foreach (int n in nodes)
-        {
-            var row = new WorkFileRow(tree, n);
-            if (a.Authors.TryGetValue(n, out var info))
-                row.Apply(info);
-            rows.Add(row);
-        }
-        return (rows, found, bytes);
+            rows.Add(MakeRow(a, n));
+        return new QueryResult(rows, hidden, found, bytes);
+    }
+
+    static WorkFileRow MakeRow(Analysis a, int node)
+    {
+        var row = new WorkFileRow(a.Tree, node);
+        if (a.Authors.TryGetValue(node, out var info))
+            row.Apply(info);
+        return row;
     }
 
     public void SortBy(string property, ListSortDirection direction) => Rows = SortHelper.Sort(Rows, property, direction);
@@ -303,18 +393,39 @@ public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSour
         Snapshots.Date(r.Created), Snapshots.Date(r.Modified), Snapshots.Date(r.Accessed), r.Author, r.LastSavedBy, r.Title, r.Availability,
     ];
 
+    /// <summary>Label of what the table holds, e.g. ".xlsx" or "Any types (json, toml)".</summary>
+    string TableLabel()
+    {
+        var group = SelectedGroup!.Group;
+        if (SelectedType is { IsAll: false } t)
+            return t.DisplayType;
+        if (!group.IsCustom)
+            return group.Name;
+        var exts = WorkFiles.ParseExtensions(CustomTypes);
+        return exts.Count == 0 ? "All files" : string.Join(" ", exts.Select(e => "." + e));
+    }
+
+    /// <summary>
+    /// The table in its current sort order. When there were too many files to show, the files that weren't shown follow,
+    /// largest first, so the CSV holds every matching file. Rows are made as the file is written.
+    /// </summary>
     public TableSnapshot? Snapshot()
     {
-        if (Rows.Count == 0 || SelectedGroup is null)
+        var a = _a;
+        if (a is null || Rows.Count == 0 || SelectedGroup is null)
             return null;
-        string group = SelectedGroup.Group.Name;
+        string group = SelectedGroup.Group.IsCustom ? TableLabel() : SelectedGroup.Group.Name;
         string detail = string.Join(", ", new[]
         {
-            SelectedType is { Extension.Length: > 0 } t ? "." + t.Extension : group,
+            TableLabel(),
             SortHelper.ScopeLabel(Main),
             NameFilter.Trim(),
         }.Where(x => x.Length > 0));
-        return new TableSnapshot("Work files", detail, Headers, Rows.Select(r => RowCells(r, group)).ToList());
+        var shown = Rows;
+        int[] hidden = _last?.Hidden ?? [];     // set together with Rows; sorting only reorders the same rows
+        var cells = new ProjectedList<IReadOnlyList<string>>(shown.Count + hidden.Length,
+            i => RowCells(i < shown.Count ? shown[i] : MakeRow(a, hidden[i - shown.Count]), group));
+        return new TableSnapshot("Work files", detail, Headers, cells);
     }
 
     /// <summary>
@@ -336,32 +447,49 @@ public sealed partial class WorkFilesViewModel : ObservableObject, ISnapshotSour
         {
             string batch = Snapshots.NewBatchFolder(folder, "Work files" + (scope.Length > 0 ? $" - {scope}" : ""), now);
             var summary = new List<IReadOnlyList<string>>();
-            foreach (var g in GroupDefinitions)
+            foreach (var g in GroupDefinitions.Where(g => !g.IsCustom))
             {
                 ct.ThrowIfCancellationRequested();
                 progress.Report($"Collecting {g.Name}…");
-                var (rows, found, bytes) = BuildRows(a, g.Extensions, root, only, "", ct);
+                var r = BuildRows(a, FileMatcher.ForGroup(a.Tree, g), -1, root, only, "", ct);
                 if (readAuthors)
                 {
-                    var pending = rows.Where(r => r.CanReadProperties && !r.IsOnlineOnly && !a.Authors.ContainsKey(r.Node)).ToList();
+                    var pending = r.Rows.Where(x => x.CanReadProperties && !x.IsOnlineOnly && !a.Authors.ContainsKey(x.Node)).ToList();
                     int done = 0;
-                    Parallel.ForEach(pending, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct }, r =>
+                    Parallel.ForEach(pending, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct }, x =>
                     {
-                        a.Authors[r.Node] = DocumentProperties.TryRead(r.Path) ?? DocumentInfo.Empty;
+                        a.Authors[x.Node] = DocumentProperties.TryRead(x.Path) ?? DocumentInfo.Empty;
                         int n = Interlocked.Increment(ref done);
                         if (n % 100 == 0)
                             progress.Report($"Reading authors for {g.Name}: {n:N0} of {pending.Count:N0}");
                     });
-                    foreach (var r in rows)
-                        if (a.Authors.TryGetValue(r.Node, out var info))
-                            r.Apply(info);
+                    foreach (var x in r.Rows)
+                        if (a.Authors.TryGetValue(x.Node, out var info))
+                            x.Apply(info);
                 }
-                Snapshots.Write(batch, new TableSnapshot(g.Name, "", Headers, rows.Select(r => RowCells(r, g.Name)).ToList()), now);
-                summary.Add([g.Name, string.Join(" ", g.Extensions.Select(e => "." + e)), found.ToString(), bytes.ToString(), Format.Bytes(bytes),
-                    rows.Count(r => r.IsOnlineOnly).ToString()]);
+                var cells = new ProjectedList<IReadOnlyList<string>>(r.Rows.Count + r.Hidden.Length,
+                    i => RowCells(i < r.Rows.Count ? r.Rows[i] : MakeRow(a, r.Hidden[i - r.Rows.Count]), g.Name));
+                Snapshots.Write(batch, new TableSnapshot(g.Name, "", Headers, cells), now);
+                int online = r.Rows.Count(x => x.IsOnlineOnly) + r.Hidden.Count(n => (a.Tree.Flags(n) & NodeFlags.CloudPlaceholder) != 0);
+                summary.Add([g.Name, g.Describe(), r.Found.ToString(), r.Bytes.ToString(), Format.Bytes(r.Bytes), online.ToString()]);
             }
-            Snapshots.Write(batch, new TableSnapshot("Summary", "", ["Group", "Types", "Files", "Size (bytes)", "Size", "Online-only files"], summary), now);
+            Snapshots.Write(batch, new TableSnapshot("Summary", "", ["Group", "Matches", "Files", "Size (bytes)", "Size", "Online-only files"], summary), now);
             return batch;
         }, ct);
     }
+}
+
+/// <summary>A read-only list whose items are made when they are read, so a big snapshot doesn't hold every row in memory.</summary>
+public sealed class ProjectedList<T>(int count, Func<int, T> item) : IReadOnlyList<T>
+{
+    public int Count => count;
+    public T this[int index] => (uint)index < (uint)count ? item(index) : throw new ArgumentOutOfRangeException(nameof(index));
+
+    public IEnumerator<T> GetEnumerator()
+    {
+        for (int i = 0; i < count; i++)
+            yield return item(i);
+    }
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }

@@ -61,7 +61,7 @@ public sealed partial class MainViewModel : ObservableObject
         new("folders", "Folders", "\uE8B7", "Folder tree sorted by size"),
         new("types", "File types", "\uE8A5", "Space by file extension"),
         new("categories", "Categories", "\uE8FD", "Space by kind of file"),
-        new("work", "Work files", "\uE8F1", "Excel, Word, PowerPoint, PDF, email, Markdown, notebooks, Python, DBC and help files with dates and authors"),
+        new("work", "Work files", "\uE8F1", "Excel, Word, PowerPoint, PDF, email, Markdown, notebooks, Python, DBC, help files, AI assistant files, or any types you choose, with dates and authors"),
         new("locations", "Locations", "\uE707", "Known places: Windows, programs, users, OneDrive"),
         new("largest", "Largest files", "\uE8CB", "Biggest single files, with filters"),
         new("age", "Age", "\uE823", "Space by when files last changed"),
@@ -303,8 +303,9 @@ public sealed partial class MainViewModel : ObservableObject
             ["Name", "Path", "Kind", "Category (folders: mostly)", "Size (bytes)", "Size", "On disk (bytes)", "Share", "Files", "Created", "Modified", "Accessed"], rows);
     }
 
-    [RelayCommand(CanExecute = nameof(CanExport))]
-    void Snapshot()
+    /// <summary>Saves the current view's table. Big tables are written on a background thread.</summary>
+    [RelayCommand(CanExecute = nameof(CanExport), AllowConcurrentExecutions = false)]
+    async Task Snapshot()
     {
         try
         {
@@ -314,7 +315,17 @@ public sealed partial class MainViewModel : ObservableObject
                 StatusText = "Nothing to snapshot in this view yet.";
                 return;
             }
-            LastSnapshot = Snapshots.Write(Settings.SnapshotFolder, table, DateTime.Now);
+            string folder = Settings.SnapshotFolder;
+            var now = DateTime.Now;
+            if (table.Rows.Count > 5_000)
+            {
+                StatusText = $"Saving snapshot ({table.Rows.Count:N0} rows)…";
+                LastSnapshot = await Task.Run(() => Snapshots.Write(folder, table, now));
+            }
+            else
+            {
+                LastSnapshot = Snapshots.Write(folder, table, now);
+            }
             StatusText = $"Snapshot saved ({table.Rows.Count:N0} rows): {LastSnapshot}";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)

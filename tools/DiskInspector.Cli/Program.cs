@@ -34,6 +34,27 @@ if (args[0] == "--authors" && args.Length > 1)
     return 0;
 }
 
+if (args[0] == "--groups" && args.Length > 1)
+{
+    // DiskInspector.Cli --groups <path> [--all-folders]: scans, then prints each work-file group's count and how long it took.
+    bool onlyMine = !args.Contains("--all-folders");
+    var scan = await new StandardScanner().ScanAsync(args[1]);
+    var tree = scan.Tree;
+    Console.WriteLine($"Scanned {tree.FileCount(0):N0} files in {Format.Duration(scan.Duration)}; only my files: {onlyMine}");
+    var clock = Stopwatch.StartNew();
+    var all = WorkFiles.CountByExtension(tree, ScanTree.RootId, onlyMine);
+    Console.WriteLine($"  {clock.ElapsedMilliseconds,6:N0} ms  count by extension ({all.Sum():N0} files)");
+    foreach (var g in WorkFiles.LoadGroups())
+    {
+        clock.Restart();
+        var matcher = g.IsCustom ? FileMatcher.AllFiles(tree) : FileMatcher.ForGroup(tree, g);
+        var found = WorkFiles.Find(tree, matcher, ScanTree.RootId, onlyMine);
+        long bytes = found.Sum(tree.Size);
+        Console.WriteLine($"  {clock.ElapsedMilliseconds,6:N0} ms  {g.Name}: {found.Count:N0} files, {Format.Bytes(bytes)}");
+    }
+    return 0;
+}
+
 string target = args[0];
 bool fast = args.Contains("--fast");
 int ci = Array.IndexOf(args, "--compare");

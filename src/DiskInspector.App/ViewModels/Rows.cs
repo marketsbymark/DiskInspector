@@ -380,9 +380,22 @@ public sealed partial class WorkFileRow : ObservableObject
     }
 }
 
+/// <summary>A group in the Work files list. A negative count is not shown (the "Any types" group depends on what is typed).</summary>
 public sealed record WorkGroupOption(WorkFileGroup Group, long Count)
 {
-    public string Label => $"{Group.Name} ({Count:N0})";
+    public string Label => Count < 0 ? Group.Name : $"{Group.Name} ({Count:N0})";
 }
 
-public sealed record TypeOption(string Label, string Extension);
+/// <summary>One choice in the Types list: every type in the group (<see cref="ExtensionId"/> -1) or one extension id.</summary>
+public sealed record TypeOption(string Label, string Extension, int ExtensionId)
+{
+    public bool IsAll => ExtensionId < 0;
+
+    /// <summary>".xlsx", or "(no extension)".</summary>
+    public string DisplayType => Extension.Length == 0 ? "(no extension)" : "." + Extension;
+
+    public static TypeOption All(string label) => new(label, "", -1);
+
+    public static TypeOption For(ushort id, string extension, long count) =>
+        new($"{(extension.Length == 0 ? "(no extension)" : "." + extension)} ({count:N0})", extension, id);
+}

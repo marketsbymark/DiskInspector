@@ -9,20 +9,28 @@
 
         <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
             <ComboBox Width="250" Margin="0,0,8,6" ItemsSource="{Binding Groups}" SelectedItem="{Binding SelectedGroup}" DisplayMemberPath="Label"
-                      ToolTip="Which kind of work file to list" />
+                      ToolTip="Which kind of work file to list. Claude, ChatGPT &amp; Codex and Gemini &amp; Antigravity find those tools' files by name and folder. 'Any types or all files' lists the extensions you type, or every file." />
+            <StackPanel Orientation="Horizontal" Margin="0,0,8,6" Visibility="{Binding IsCustomGroup, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="Extensions:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <TextBox Width="220" Text="{Binding CustomTypes, UpdateSourceTrigger=PropertyChanged}"
+                         ToolTip="Extensions separated by commas or spaces, for example: json, toml, sql. Leave empty (or type *) to list every file in what you're showing. Use the Showing bar or scan a folder (such as C:\Dev) to limit it to that folder and below." />
+            </StackPanel>
             <ComboBox Width="170" Margin="0,0,8,6" ItemsSource="{Binding Types}" SelectedItem="{Binding SelectedType}" DisplayMemberPath="Label"
                       ToolTip="All types in the group, or one type on its own" />
-            <TextBox Width="200" Margin="0,0,8,6" Text="{Binding NameFilter, UpdateSourceTrigger=PropertyChanged}" ToolTip="Show only files whose name contains this text" />
+            <StackPanel Orientation="Horizontal" Margin="0,0,8,6">
+                <TextBlock Text="Name contains:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <TextBox Width="180" Text="{Binding NameFilter, UpdateSourceTrigger=PropertyChanged}" ToolTip="Show only files whose name contains this text" />
+            </StackPanel>
             <CheckBox Content="Only my files" IsChecked="{Binding OnlyUserFolders}" Margin="0,0,12,6" VerticalAlignment="Center"
-                      ToolTip="Skip Windows, Program Files, ProgramData, AppData and package or cache folders (node_modules, site-packages, .git, ...)" />
-            <Button Command="{Binding Main.SnapshotCommand}" Margin="0,0,6,6" ToolTip="Save this table as a CSV file in the snapshot folder">
+                      ToolTip="Skip Windows, Program Files, ProgramData, AppData and package or cache folders (node_modules, site-packages, .git, ...), and files Windows marks as system files. Turn it off to include app data, such as Claude Desktop's or the ChatGPT app's folders in AppData." />
+            <Button Command="{Binding Main.SnapshotCommand}" Margin="0,0,6,6" ToolTip="Save this table as a CSV file in the snapshot folder. Every matching file is saved, even when the table shows only the largest 100,000.">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Style="{StaticResource Icon}" Text="&#xE722;" FontSize="14" Margin="0,0,6,0" />
                     <TextBlock Text="Snapshot table" />
                 </StackPanel>
             </Button>
             <Button Command="{Binding Main.SnapshotAllWorkFilesCommand}" Margin="0,0,6,6"
-                    ToolTip="Save one CSV per group (Excel, CSV, Word, PowerPoint, PDF, email, Markdown, notebooks, Python, DBC, help files) plus a summary, in a new folder">
+                    ToolTip="Save one CSV per group (Excel, CSV, Word, PowerPoint, PDF, email, Markdown, notebooks, Python, DBC, help files, Claude, ChatGPT &amp; Codex, Gemini &amp; Antigravity) plus a summary, in a new folder">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Style="{StaticResource Icon}" Text="&#xE8F1;" FontSize="14" Margin="0,0,6,0" />
                     <TextBlock Text="Snapshot all groups" />
@@ -61,7 +69,7 @@
                             </DataTemplate>
                         </GridViewColumn.CellTemplate>
                     </GridViewColumn>
-                    <GridViewColumn Header="Type" Width="60" DisplayMemberBinding="{Binding Type}" c:GridViewSort.Property="Type" />
+                    <GridViewColumn Header="Type" Width="85" DisplayMemberBinding="{Binding Type}" c:GridViewSort.Property="Type" />
                     <GridViewColumn Header="Size" Width="85" c:GridViewSort.Property="Size">
                         <GridViewColumn.CellTemplate>
                             <DataTemplate DataType="vm:WorkFileRow">

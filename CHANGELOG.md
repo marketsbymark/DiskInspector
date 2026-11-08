@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+
+- **Any types or all files** (in Work files): type extensions such as `json, toml, sql`, or leave the box empty for every file. It covers everything scanned or one folder and below: scan a folder such as `C:\Dev`, or use **Use selected folder**.
+- **AI assistant groups** in Work files. They match by file name and folder, not only extension:
+  - **Claude**: `.claude` folders, `CLAUDE.md`, `.claude.json`, `.mcp.json`, `claude_desktop_config.json` and `Claude*` files. With "Only my files" off, also Claude Desktop's app data.
+  - **ChatGPT & Codex**: `.codex` and `.agents` folders, `AGENTS.md`, `ChatGPT*` files and `Documents\Codex`. With "Only my files" off, also the ChatGPT and Codex app packages.
+  - **Gemini & Antigravity**: `.gemini`, `.antigravity` and `.agent` folders, `GEMINI.md`, and `Gemini*` and `Antigravity*` files. With "Only my files" off, also Antigravity's app data and install folder.
+- `work-file-groups.json` groups can use `fileNames` (wildcards allowed) and `folders` (folder names, or full paths with environment variables).
+- `DiskInspector.Cli --groups <path> [--all-folders]` prints each group's file count, size and timing.
+
+### Changed
+
+- **Snapshot table** now saves every matching file, including the ones the table leaves out when it shows only the largest 100,000. Big snapshots are written in the background.
+- "Only my files" also leaves out files Windows marks as system files, such as `pagefile.sys`, `hiberfil.sys` and `desktop.ini`.
+- In "Any types" and the AI groups, the Types list offers each extension found, including files with no extension.
+
 ## 1.1.1
 
 - Work files: the DBC Finance group now includes DDL import files (.ddl) along with .df2. Pick .ddl in Types to see only DDL files.

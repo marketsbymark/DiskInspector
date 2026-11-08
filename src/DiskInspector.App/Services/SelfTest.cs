@@ -131,9 +131,30 @@ public static class SelfTest
                 await WaitFor(() => !vm.WorkFiles.IsBusy, 20000);
                 Note($"work files {g.Label}: {vm.WorkFiles.Summary}");
             }
+            // Typed extensions, then every file, in "Any types or all files".
+            vm.WorkFiles.SelectedGroup = vm.WorkFiles.Groups.First(g => g.Group.IsCustom);
+            vm.WorkFiles.CustomTypes = "json, *.toml .sql";
+            await Idle(800);
+            await WaitFor(() => !vm.WorkFiles.IsBusy, 20000);
+            Note($"work files typed json/toml/sql: {vm.WorkFiles.Summary}; types {string.Join(" ", vm.WorkFiles.Types.Skip(1).Select(t => t.Label))}");
+            vm.WorkFiles.CustomTypes = "";
+            await Idle(800);
+            await WaitFor(() => !vm.WorkFiles.IsBusy, 30000);
+            Note($"work files all files: {vm.WorkFiles.Summary}; {vm.WorkFiles.Types.Count - 1} types offered");
+            Shot(window, outDir, "15a-work-files-any-type");
+            if (vm.WorkFiles.FoundCount > vm.WorkFiles.Rows.Count)
+            {
+                // More files than the table shows: the snapshot must still hold every one.
+                vm.Settings.SnapshotFolder = snapDir;
+                await vm.SnapshotCommand.ExecuteAsync(null);
+                int allLines = vm.LastSnapshot is { } big && File.Exists(big) ? File.ReadLines(big).Count() - 1 : -1;
+                Note($"all-files snapshot rows {allLines:N0} of {vm.WorkFiles.FoundCount:N0} found (table {vm.WorkFiles.Rows.Count:N0}): {vm.StatusText}");
+                if (allLines != vm.WorkFiles.FoundCount)
+                    throw new InvalidOperationException("All-files snapshot is missing rows");
+            }
             vm.WorkFiles.SelectedGroup = vm.WorkFiles.Groups.First(g => g.Group.Key == "excel");
             await WaitFor(() => !vm.WorkFiles.IsBusy, 20000);
-            var xlsx = vm.WorkFiles.Types.FirstOrDefault(t => t.Extension == "xlsx");
+            var xlsx = vm.WorkFiles.Types.FirstOrDefault(t => t.Extension == "xlsx" && !t.IsAll);
             if (xlsx is not null)
             {
                 vm.WorkFiles.SelectedType = xlsx;
@@ -145,7 +166,7 @@ public static class SelfTest
             vm.WorkFiles.SortBy("Size", System.ComponentModel.ListSortDirection.Descending);
             await Idle(1500);
             Shot(window, outDir, "15-work-files");
-            vm.SnapshotCommand.Execute(null);
+            await vm.SnapshotCommand.ExecuteAsync(null);
             Note($"snapshot: {vm.StatusText}");
             if (vm.LastSnapshot is null || !File.Exists(vm.LastSnapshot))
                 throw new InvalidOperationException("Snapshot file was not written");
@@ -159,7 +180,7 @@ public static class SelfTest
             {
                 vm.ShowView(view.Key);
                 await Idle(400);
-                vm.SnapshotCommand.Execute(null);
+                await vm.SnapshotCommand.ExecuteAsync(null);
                 Note($"snapshot {view.Title}: {(vm.StatusText.StartsWith("Snapshot saved") ? "ok" : vm.StatusText)}");
             }
 
@@ -177,7 +198,7 @@ public static class SelfTest
             }
             await vm.SnapshotAllWorkFilesCommand.ExecuteAsync(null);
             Note($"snapshot all groups: {vm.StatusText}");
-            if (vm.LastSnapshot is null || !Directory.Exists(vm.LastSnapshot) || Directory.GetFiles(vm.LastSnapshot, "*.csv").Length != vm.WorkFiles.GroupDefinitions.Count + 1)
+            if (vm.LastSnapshot is null || !Directory.Exists(vm.LastSnapshot) || Directory.GetFiles(vm.LastSnapshot, "*.csv").Length != vm.WorkFiles.GroupDefinitions.Count(g => !g.IsCustom) + 1)
                 throw new InvalidOperationException("Snapshot of all groups is incomplete");
             vm.ScopeToEverythingCommand.Execute(null);
             await WaitFor(() => vm.Scope?.Root == 0, 20000);

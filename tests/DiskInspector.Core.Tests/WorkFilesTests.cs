@@ -231,6 +231,150 @@ public class WorkFilesTests
         Assert.Equal("Documents", Categorizer.Default.ForExtension("chm").Name);
         Assert.Equal("Documents", Categorizer.Default.ForExtension("ddl").Name);
     }
+
+    static ScanTree AiTree()
+    {
+        var t = new ScanTree(@"C:\");
+        int users = t.Add(0, "Users", NodeFlags.Directory, 0, 0, 0);
+        int me = t.Add(users, "me", NodeFlags.Directory, 0, 0, 0);
+        int claude = t.Add(me, ".claude", NodeFlags.Directory, 0, 0, 0);
+        t.Add(claude, "settings.json", NodeFlags.None, 1, 1, 0);
+        int projects = t.Add(claude, "projects", NodeFlags.Directory, 0, 0, 0);
+        t.Add(projects, "session.jsonl", NodeFlags.None, 2, 2, 0);
+        t.Add(me, ".claude.json", NodeFlags.None, 3, 3, 0);
+        int codex = t.Add(me, ".codex", NodeFlags.Directory, 0, 0, 0);
+        t.Add(codex, "config.toml", NodeFlags.None, 4, 4, 0);
+        int gemini = t.Add(me, ".gemini", NodeFlags.Directory, 0, 0, 0);
+        t.Add(gemini, "GEMINI.md", NodeFlags.None, 5, 5, 0);
+        int ag = t.Add(gemini, "antigravity", NodeFlags.Directory, 0, 0, 0);
+        t.Add(ag, "brain.pb", NodeFlags.None, 6, 6, 0);
+        int downloads = t.Add(me, "Downloads", NodeFlags.Directory, 0, 0, 0);
+        t.Add(downloads, "gemini-code-1.html", NodeFlags.None, 7, 7, 0);
+        t.Add(downloads, "ChatGPT Image May 22.png", NodeFlags.None, 8, 8, 0);
+        t.Add(downloads, "Claude Setup.exe", NodeFlags.None, 9, 9, 0);
+        t.Add(downloads, "holiday.png", NodeFlags.None, 10, 10, 0);
+        int dev = t.Add(0, "Dev", NodeFlags.Directory, 0, 0, 0);
+        int proj = t.Add(dev, "Tool", NodeFlags.Directory, 0, 0, 0);
+        t.Add(proj, "CLAUDE.md", NodeFlags.None, 11, 11, 0);
+        t.Add(proj, "AGENTS.md", NodeFlags.None, 12, 12, 0);
+        t.Add(proj, "README.md", NodeFlags.None, 13, 13, 0);
+        t.Add(proj, "data.json", NodeFlags.None, 14, 14, 0);
+        t.Add(proj, "LICENSE", NodeFlags.None, 15, 15, 0);
+        int dotAgent = t.Add(proj, ".agent", NodeFlags.Directory, 0, 0, 0);
+        t.Add(dotAgent, "rules.md", NodeFlags.None, 16, 16, 0);
+        int appdata = t.Add(me, "AppData", NodeFlags.Directory, 0, 0, 0);
+        int roaming = t.Add(appdata, "Roaming", NodeFlags.Directory, 0, 0, 0);
+        int claudeApp = t.Add(roaming, "Claude", NodeFlags.Directory, 0, 0, 0);
+        t.Add(claudeApp, "claude_desktop_config.json", NodeFlags.None, 17, 17, 0);
+        int vm = t.Add(claudeApp, "vm_bundles", NodeFlags.Directory, 0, 0, 0);
+        t.Add(vm, "rootfs.img", NodeFlags.None, 1000, 1000, 0);
+        int local = t.Add(appdata, "Local", NodeFlags.Directory, 0, 0, 0);
+        int packages = t.Add(local, "Packages", NodeFlags.Directory, 0, 0, 0);
+        int chatgpt = t.Add(packages, "OpenAI.ChatGPT-Desktop_2p2nqsd0c76g0", NodeFlags.Directory, 0, 0, 0);
+        t.Add(chatgpt, "cache.db", NodeFlags.None, 18, 18, 0);
+        int other = t.Add(packages, "Microsoft.Paint_8wekyb3d8bbwe", NodeFlags.Directory, 0, 0, 0);
+        t.Add(other, "paint.db", NodeFlags.None, 19, 19, 0);
+        t.Add(0, "pagefile.sys", NodeFlags.System | NodeFlags.Hidden, 5000, 5000, 0);
+        t.Complete();
+        return t;
+    }
+
+    /// <summary>A default AI group with its full-path folders pointed at the test tree's user folder.</summary>
+    static WorkFileGroup TestGroup(string key) => WorkFiles.LoadGroups(includeUserFile: false).Single(g => g.Key == key) is var g
+        ? g with { Folders = g.Folders.Select(f => f.Replace("%APPDATA%", "%DI_TEST_HOME%\\AppData\\Roaming").Replace("%LOCALAPPDATA%", "%DI_TEST_HOME%\\AppData\\Local")
+            .Replace("%USERPROFILE%", "%DI_TEST_HOME%")).ToList() }
+        : throw new InvalidOperationException();
+
+    static string[] Match(ScanTree t, WorkFileGroup g, bool only, int root = ScanTree.RootId) =>
+        WorkFiles.Find(t, FileMatcher.ForGroup(t, g), root, only).Select(t.Name).Order(StringComparer.Ordinal).ToArray();
+
+    [Fact]
+    public void Ai_groups_find_files_by_name_and_folder()
+    {
+        Environment.SetEnvironmentVariable("DI_TEST_HOME", @"C:\Users\me");
+        var t = AiTree();
+        // Only my files: the tools' own folders in the profile and projects, not AppData.
+        Assert.Equal([".claude.json", "CLAUDE.md", "Claude Setup.exe", "session.jsonl", "settings.json"], Match(t, TestGroup("claude"), only: true));
+        Assert.Equal(["AGENTS.md", "ChatGPT Image May 22.png", "config.toml"], Match(t, TestGroup("codex"), only: true));
+        Assert.Equal(["GEMINI.md", "brain.pb", "gemini-code-1.html", "rules.md"], Match(t, TestGroup("gemini"), only: true));
+        // Everything: also the apps' AppData folders, including a wildcard Store package folder, but not other packages.
+        Assert.Equal([".claude.json", "CLAUDE.md", "Claude Setup.exe", "claude_desktop_config.json", "rootfs.img", "session.jsonl", "settings.json"],
+            Match(t, TestGroup("claude"), only: false));
+        Assert.Contains("cache.db", Match(t, TestGroup("codex"), only: false));
+        Assert.DoesNotContain("paint.db", Match(t, TestGroup("codex"), only: false));
+        // Scoped below a matched folder: everything there still counts.
+        int projects = t.FindByPath(@"C:\Users\me\.claude\projects");
+        Assert.Equal(["session.jsonl"], Match(t, TestGroup("claude"), only: true, projects));
+        // Counts by extension for the Types list.
+        var counts = WorkFiles.CountByExtension(t, FileMatcher.ForGroup(t, TestGroup("claude")), ScanTree.RootId, onlyUserFolders: true);
+        Assert.True(t.Extensions.TryGetId("json", out ushort json));
+        Assert.Equal(2, counts[json]);
+        Assert.Equal(5, counts.Sum());
+    }
+
+    [Fact]
+    public void Ai_groups_are_listed_but_not_in_all_work_files()
+    {
+        var groups = WorkFiles.LoadGroups(includeUserFile: false);
+        foreach (var key in new[] { "claude", "codex", "gemini" })
+            Assert.True(groups.Single(g => g.Key == key).HasRules);
+        Assert.Contains(".claude", groups.Single(g => g.Key == "claude").Folders);
+        Assert.Contains("AGENTS.md", groups.Single(g => g.Key == "codex").FileNames);
+        Assert.Contains(".gemini", groups.Single(g => g.Key == "gemini").Folders);
+        Assert.True(groups[^1].IsCustom);
+        Assert.DoesNotContain("json", groups[0].Extensions);
+        var t = AiTree();
+        var all = WorkFiles.Find(t, FileMatcher.ForGroup(t, groups[0]), ScanTree.RootId, true).Select(t.Name).ToArray();
+        Assert.Contains("README.md", all);
+        Assert.DoesNotContain("settings.json", all);
+        Assert.DoesNotContain("Claude Setup.exe", all);
+    }
+
+    [Theory]
+    [InlineData("json, *.toml .SQL;md", "json,toml,sql,md")]
+    [InlineData("  ", "")]
+    [InlineData("*", "")]
+    [InlineData("*.*", "")]
+    [InlineData(".csv,csv", "csv")]
+    public void Typed_extensions_are_parsed(string text, string expected) =>
+        Assert.Equal(expected, string.Join(",", WorkFiles.ParseExtensions(text)));
+
+    [Fact]
+    public void Any_types_lists_typed_extensions_or_every_file_below_a_folder()
+    {
+        var t = AiTree();
+        int dev = t.FindByPath(@"C:\Dev");
+        string[] Names(string typed, bool only) =>
+            WorkFiles.Find(t, FileMatcher.ForExtensions(t, WorkFiles.ParseExtensions(typed)), dev, only).Select(t.Name).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(["data.json"], Names("json", only: true));
+        Assert.Equal(["AGENTS.md", "CLAUDE.md", "README.md", "data.json", "rules.md"], Names("md json", only: true));
+        // Empty means every file, including files without an extension.
+        Assert.Equal(["AGENTS.md", "CLAUDE.md", "LICENSE", "README.md", "data.json", "rules.md"], Names("", only: true));
+        Assert.Equal(t.FileCount(ScanTree.RootId), WorkFiles.Find(t, FileMatcher.AllFiles(t), ScanTree.RootId, false).Count);
+        // "Only my files" leaves out system files such as pagefile.sys.
+        Assert.DoesNotContain("pagefile.sys", WorkFiles.Find(t, FileMatcher.AllFiles(t), ScanTree.RootId, true).Select(t.Name));
+        Assert.Contains("pagefile.sys", WorkFiles.Find(t, FileMatcher.AllFiles(t), ScanTree.RootId, false).Select(t.Name));
+    }
+
+    [Fact]
+    public void User_file_adds_a_group_by_name_and_folder()
+    {
+        string file = Path.Combine(Path.GetTempPath(), $"di-groups-{Guid.NewGuid():N}.json");
+        File.WriteAllText(file, """{ "groups": [ { "key": "readme", "name": "Readmes", "fileNames": ["README*", "LICENSE"], "folders": [".agent"] } ] }""");
+        try
+        {
+            var groups = WorkFiles.LoadGroups(true, file);
+            var g = groups.Single(x => x.Key == "readme");
+            Assert.True(g.HasRules);
+            Assert.True(groups[^1].IsCustom);
+            var t = AiTree();
+            Assert.Equal(["LICENSE", "README.md", "rules.md"], Match(t, g, only: true));
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
 }
 
 public class DocumentPropertiesTests
