@@ -22,7 +22,7 @@
                 </StackPanel>
             </Button>
             <Button Command="{Binding Main.SnapshotAllWorkFilesCommand}" Margin="0,0,6,6"
-                    ToolTip="Save one CSV per group (Excel, CSV, Word, PowerPoint, PDF, email, Markdown, notebooks, Python, DBC) plus a summary, in a new folder">
+                    ToolTip="Save one CSV per group (Excel, CSV, Word, PowerPoint, PDF, email, Markdown, notebooks, Python, DBC, help files) plus a summary, in a new folder">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Style="{StaticResource Icon}" Text="&#xE8F1;" FontSize="14" Margin="0,0,6,0" />
                     <TextBlock Text="Snapshot all groups" />

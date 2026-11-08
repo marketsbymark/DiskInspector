@@ -138,6 +138,8 @@ public class WorkFilesTests
         t.Add(docs, "data.csv", NodeFlags.None, 20, 20, 0);
         t.Add(docs, "memo.docx", NodeFlags.None, 30, 30, 0);
         t.Add(docs, "deal.df2", NodeFlags.None, 40, 40, 0);
+        t.Add(docs, "series.ddl", NodeFlags.None, 8, 8, 0);
+        t.Add(docs, "manual.chm", NodeFlags.None, 9, 9, 0);
         t.Add(docs, "notes.md", NodeFlags.None, 1, 1, 0);
         t.Add(docs, "model.ipynb", NodeFlags.None, 2, 2, 0);
         t.Add(docs, "script.py", NodeFlags.None, 3, 3, 0);
@@ -167,7 +169,8 @@ public class WorkFilesTests
         Assert.Contains("md", Of("markdown"));
         Assert.Equal("ipynb", Of("notebooks"));
         Assert.Contains("py", Of("python"));
-        Assert.Equal("df2", Of("dbc"));
+        Assert.Equal("df2,ddl", Of("dbc"));
+        Assert.Equal("chm,hlp", Of("help"));
         Assert.All(groups.Skip(1).SelectMany(g => g.Extensions), e => Assert.Contains(e, groups[0].Extensions));
     }
 
@@ -175,11 +178,11 @@ public class WorkFilesTests
     public void User_file_changes_and_adds_groups()
     {
         string file = Path.Combine(Path.GetTempPath(), $"di-groups-{Guid.NewGuid():N}.json");
-        File.WriteAllText(file, """{ "groups": [ { "key": "dbc", "extensions": ["df2", ".DDL"] }, { "key": "sql", "name": "SQL", "extensions": ["sql"] } ] }""");
+        File.WriteAllText(file, """{ "groups": [ { "key": "dbc", "extensions": [".DF2"] }, { "key": "sql", "name": "SQL", "extensions": ["sql"] } ] }""");
         try
         {
             var groups = WorkFiles.LoadGroups(true, file);
-            Assert.Equal(["df2", "ddl"], groups.Single(g => g.Key == "dbc").Extensions);
+            Assert.Equal(["df2"], groups.Single(g => g.Key == "dbc").Extensions);
             Assert.Equal("DBC Finance", groups.Single(g => g.Key == "dbc").Name);
             Assert.Equal("SQL", groups.Single(g => g.Key == "sql").Name);
             Assert.Contains("sql", groups[0].Extensions);
@@ -213,6 +216,20 @@ public class WorkFilesTests
         Assert.Equal(1, counts[py]);
         Assert.True(t.Extensions.TryGetId("df2", out ushort df2));
         Assert.Equal(1, counts[df2]);
+    }
+
+    [Fact]
+    public void Dbc_group_finds_ddl_alone_or_with_df2_and_help_finds_chm()
+    {
+        var t = Tree();
+        var groups = WorkFiles.LoadGroups(includeUserFile: false);
+        string[] Names(IEnumerable<string> exts) =>
+            WorkFiles.Find(t, WorkFiles.ExtensionMask(t, exts), ScanTree.RootId, onlyUserFolders: true).Select(t.Name).Order().ToArray();
+        Assert.Equal(["deal.df2", "series.ddl"], Names(groups.Single(g => g.Key == "dbc").Extensions));
+        Assert.Equal(["series.ddl"], Names(["ddl"]));   // the type picker's ".ddl only" search
+        Assert.Equal(["manual.chm"], Names(groups.Single(g => g.Key == "help").Extensions));
+        Assert.Equal("Documents", Categorizer.Default.ForExtension("chm").Name);
+        Assert.Equal("Documents", Categorizer.Default.ForExtension("ddl").Name);
     }
 }
 

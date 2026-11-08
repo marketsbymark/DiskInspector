@@ -25,7 +25,8 @@ public static class WorkFiles
         new("markdown", "Markdown", ["md", "markdown", "mdx"]),
         new("notebooks", "Jupyter notebooks", ["ipynb"]),
         new("python", "Python", ["py", "pyw", "pyi", "pyx"]),
-        new("dbc", "DBC Finance", ["df2"]),
+        new("dbc", "DBC Finance", ["df2", "ddl"]),
+        new("help", "Help files", ["chm", "hlp"]),
     ];
 
     public static string UserFilePath { get; } =

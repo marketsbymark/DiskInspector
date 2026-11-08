@@ -45,7 +45,11 @@
         "eml",
         "pst",
         "ost",
-        "mbox"
+        "mbox",
+        "chm",
+        "hlp",
+        "df2",
+        "ddl"
       ]
     },
     {

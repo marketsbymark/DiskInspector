@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+- Work files: the DBC Finance group now includes DDL import files (.ddl) along with .df2. Pick .ddl in Types to see only DDL files.
+- Work files: new **Help files** group for compiled help (.chm) and legacy WinHelp (.hlp).
+- .chm, .hlp, .df2 and .ddl now count as Documents in the category views.
+
 ## 1.1.0
 
 ### Added

@@ -61,7 +61,7 @@ public sealed partial class MainViewModel : ObservableObject
         new("folders", "Folders", "\uE8B7", "Folder tree sorted by size"),
         new("types", "File types", "\uE8A5", "Space by file extension"),
         new("categories", "Categories", "\uE8FD", "Space by kind of file"),
-        new("work", "Work files", "\uE8F1", "Excel, Word, PowerPoint, PDF, email, Markdown, notebooks, Python, DBC files with dates and authors"),
+        new("work", "Work files", "\uE8F1", "Excel, Word, PowerPoint, PDF, email, Markdown, notebooks, Python, DBC and help files with dates and authors"),
         new("locations", "Locations", "\uE707", "Known places: Windows, programs, users, OneDrive"),
         new("largest", "Largest files", "\uE8CB", "Biggest single files, with filters"),
         new("age", "Age", "\uE823", "Space by when files last changed"),

@@ -64,7 +64,8 @@ One sortable table per group (click any column header to sort):
 | Markdown | .md .markdown .mdx |
 | Jupyter notebooks | .ipynb |
 | Python | .py .pyw .pyi .pyx |
-| DBC Finance | .df2 |
+| DBC Finance | .df2 .ddl (pick .ddl in Types to see only DDL import files) |
+| Help files | .chm .hlp |
 
 - **Types**: show the whole group, or one type on its own (for example only .xlsb).
 - **Only my files** skips Windows, Program Files, ProgramData, AppData and package or cache folders (node_modules, site-packages, .venv, .git, ...). Turn it off to see everything.
@@ -72,7 +73,7 @@ One sortable table per group (click any column header to sort):
 - **Authors** are read from inside the files: Office (new and old formats), PDF, Outlook .msg (sender) and .eml (From).
   - Files are opened read-only, Windows is told not to update their last-accessed date, and online-only files are never opened.
   - This happens automatically for tables with up to 2,000 readable files; for bigger tables click **Read authors**.
-  - Markdown, Python, notebooks, CSV and .df2 files don't record an author.
+  - Markdown, Python, notebooks, CSV, DBC and help files don't record an author.
 
 ## Snapshots ("CSV screenshots")
 
@@ -101,10 +102,10 @@ Create `%APPDATA%\DiskInspector\categories.json` to move extensions or add categ
 Create `%APPDATA%\DiskInspector\work-file-groups.json` to change a group's types (same key) or add groups:
 
 ```json
-{ "groups": [ { "key": "dbc", "extensions": ["df2", "ddl"] }, { "key": "sql", "name": "SQL scripts", "extensions": ["sql"] } ] }
+{ "groups": [ { "key": "dbc", "extensions": ["df2"] }, { "key": "sql", "name": "SQL scripts", "extensions": ["sql"] } ] }
 ```
 
-Built-in keys: `excel`, `csv`, `word`, `powerpoint`, `pdf`, `outlook`, `markdown`, `notebooks`, `python`, `dbc`. If a file is broken, the app ignores it and shows a notice.
+Built-in keys: `excel`, `csv`, `word`, `powerpoint`, `pdf`, `outlook`, `markdown`, `notebooks`, `python`, `dbc`, `help`. If a file is broken, the app ignores it and shows a notice.
 
 ## Logs
 
