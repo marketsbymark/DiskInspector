@@ -22,6 +22,21 @@ public sealed class Analysis
 
     public ScanTree Tree => Result.Tree;
 
+    /// <summary>Document properties read so far, by node (shared by every work-files table of this scan).</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<int, DocumentInfo> Authors { get; } = new();
+
+    /// <summary>Breakdowns for the whole scan.</summary>
+    public ScopeStats Everything => new(ScanTree.RootId, Extensions, Categories, Ages);
+
+    /// <summary>Breakdowns for the files below one folder.</summary>
+    public ScopeStats ComputeScope(int root, CancellationToken ct)
+    {
+        if (root <= ScanTree.RootId)
+            return Everything;
+        var ext = FileTypeAnalysis.ByExtension(Tree, Colors.Categorizer, root, ct);
+        return new ScopeStats(root, ext, FileTypeAnalysis.ByCategory(ext, Colors.Categorizer), AgeAnalysis.Compute(Tree, DateTime.UtcNow, root));
+    }
+
     public static Analysis Run(ScanResult result, Categorizer categorizer)
     {
         var ext = FileTypeAnalysis.ByExtension(result.Tree, categorizer);
@@ -37,8 +52,48 @@ public sealed class Analysis
     }
 }
 
+/// <summary>File-type, category and age breakdowns for the current scope (everything, or one folder).</summary>
+public sealed record ScopeStats(int Root, IReadOnlyList<ExtensionStat> Extensions, IReadOnlyList<CategoryStat> Categories, IReadOnlyList<AgeBucket> Ages);
+
+/// <summary>A view that can save what it shows as a CSV snapshot.</summary>
+public interface ISnapshotSource
+{
+    TableSnapshot? Snapshot();
+}
+
+/// <summary>A view model that sorts its own rows (faster than a WPF collection view for big tables).</summary>
+public interface ISortableTable
+{
+    void SortBy(string property, System.ComponentModel.ListSortDirection direction);
+}
+
+public static class SortHelper
+{
+    /// <summary>Rows sorted by a property (numbers and dates by value, text without case).</summary>
+    public static IReadOnlyList<T> Sort<T>(IReadOnlyList<T> rows, string property, System.ComponentModel.ListSortDirection direction)
+    {
+        var prop = typeof(T).GetProperty(property);
+        if (prop is null || rows.Count < 2)
+            return rows;
+        var keys = rows.Select(r => prop.GetValue(r)).ToArray();
+        var items = rows.ToArray();
+        IComparer<object?> cmp = Comparer<object?>.Create((a, b) =>
+            a is string sa && b is string sb ? StringComparer.CurrentCultureIgnoreCase.Compare(sa, sb) : Comparer<object?>.Default.Compare(a, b));
+        if (direction == System.ComponentModel.ListSortDirection.Descending)
+        {
+            var asc = cmp;
+            cmp = Comparer<object?>.Create((a, b) => asc.Compare(b, a));
+        }
+        Array.Sort(keys, items, cmp);
+        return items;
+    }
+
+    public static string ScopeLabel(MainViewModel main) =>
+        main.Tree is { } t && main.ScopeRoot > 0 && main.ScopeRoot < t.Count ? t.Name(main.ScopeRoot) : "";
+}
+
 /// <summary>Folder tree shown as a flat, virtualized list with expand/collapse.</summary>
-public sealed partial class FolderTreeViewModel(MainViewModel main) : ObservableObject
+public sealed partial class FolderTreeViewModel(MainViewModel main) : ObservableObject, ISnapshotSource
 {
     const int MaxChildrenShown = 1000;
     Analysis? _a;
@@ -163,6 +218,20 @@ public sealed partial class FolderTreeViewModel(MainViewModel main) : Observable
         SelectWithoutSync(target);
     }
 
+    public TableSnapshot? Snapshot()
+    {
+        if (_a is null)
+            return null;
+        var t = _a.Tree;
+        var rows = Rows.Select(r => (IReadOnlyList<string>)(r.IsMore
+            ? [new string(' ', r.Level * 2) + r.Name, "", "", r.Size.ToString(), r.SizeText, "", "", "", "", "", "", ""]
+            : [new string(' ', r.Level * 2) + r.Name, t.GetFullPath(r.Node), r.IsDirectory ? "Folder" : "File", r.Size.ToString(), r.SizeText,
+                r.Allocated.ToString(), r.PercentText, r.IsDirectory ? r.Files.ToString() : "", r.IsDirectory ? r.Folders.ToString() : "",
+                Snapshots.Date(t.CreatedUtc(r.Node)), Snapshots.Date(r.Modified), r.Badge])).ToList();
+        return new TableSnapshot("Folders", "", ["Name", "Path", "Kind", "Size (bytes)", "Size", "On disk (bytes)", "% of parent", "Files", "Folders",
+            "Created", "Modified", "Note"], rows);
+    }
+
     void SelectWithoutSync(FolderRow? row)
     {
         _syncing = true;
@@ -180,7 +249,7 @@ public sealed partial class FolderTreeViewModel(MainViewModel main) : Observable
     }
 }
 
-public sealed partial class TypesViewModel(MainViewModel main) : ObservableObject
+public sealed partial class TypesViewModel(MainViewModel main) : ObservableObject, ISnapshotSource, ISortableTable
 {
     public MainViewModel Main { get; } = main;
 
@@ -205,12 +274,20 @@ public sealed partial class TypesViewModel(MainViewModel main) : ObservableObjec
             return;
         }
         var metric = Main.Metric;
-        long total = Math.Max(1, a.Tree.GetSize(0, metric));
-        Rows = a.Extensions.Select(e => new ExtensionRow(e, (double)(metric == SizeMetric.Logical ? e.Size : e.Allocated) / total))
+        var scope = Main.Scope ?? a.Everything;
+        long total = Math.Max(1, a.Tree.GetSize(scope.Root, metric));
+        Rows = scope.Extensions.Select(e => new ExtensionRow(e, (double)(metric == SizeMetric.Logical ? e.Size : e.Allocated) / total))
             .OrderByDescending(r => metric == SizeMetric.Logical ? r.Size : r.Allocated).ToList();
-        Slices = a.Categories.Select(c => new DonutSlice(c.Category.Name, metric == SizeMetric.Logical ? c.Size : c.Allocated, BrushCache.Get(c.Category.Color))).ToList();
-        Summary = $"{a.Extensions.Count:N0}";
+        Slices = scope.Categories.Select(c => new DonutSlice(c.Category.Name, metric == SizeMetric.Logical ? c.Size : c.Allocated, BrushCache.Get(c.Category.Color))).ToList();
+        Summary = $"{scope.Extensions.Count:N0}";
     }
+
+    public void SortBy(string property, System.ComponentModel.ListSortDirection direction) => Rows = SortHelper.Sort(Rows, property, direction);
+
+    public TableSnapshot? Snapshot() => Rows.Count == 0 ? null : new TableSnapshot("File types", SortHelper.ScopeLabel(Main),
+        ["Type", "Category", "Files", "Size (bytes)", "Size", "On disk (bytes)", "Share", "Average (bytes)", "Largest file"],
+        Rows.Select(r => (IReadOnlyList<string>)[r.Extension, r.Category, r.Count.ToString(), r.Size.ToString(), r.SizeText, r.Allocated.ToString(),
+            r.PercentText, r.Average.ToString(), r.Stat.LargestNode >= 0 && Main.Tree is { } t ? t.GetFullPath(r.Stat.LargestNode) : ""]).ToList());
 
     partial void OnSelectedRowChanged(ExtensionRow? value)
     {
@@ -219,7 +296,7 @@ public sealed partial class TypesViewModel(MainViewModel main) : ObservableObjec
     }
 }
 
-public sealed partial class CategoriesViewModel(MainViewModel main) : ObservableObject
+public sealed partial class CategoriesViewModel(MainViewModel main) : ObservableObject, ISnapshotSource
 {
     Analysis? _a;
     CancellationTokenSource? _cts;
@@ -263,8 +340,9 @@ public sealed partial class CategoriesViewModel(MainViewModel main) : Observable
         }
         var metric = Main.Metric;
         string? keep = SelectedCategory?.Name;
-        long total = Math.Max(1, a.Tree.GetSize(0, metric));
-        Rows = a.Categories.Where(c => c.Count > 0)
+        var scope = Main.Scope ?? a.Everything;
+        long total = Math.Max(1, a.Tree.GetSize(scope.Root, metric));
+        Rows = scope.Categories.Where(c => c.Count > 0)
             .Select(c => new CategoryRow(c, (double)(metric == SizeMetric.Logical ? c.Size : c.Allocated) / total, metric))
             .OrderByDescending(r => r.Size).ToList();
         Slices = Rows.Select(r => new DonutSlice(r.Name, r.Size, r.Brush)).ToList();
@@ -299,12 +377,28 @@ public sealed partial class CategoriesViewModel(MainViewModel main) : Observable
             Main.SelectedNode = value.Node;
     }
 
+    public TableSnapshot? Snapshot()
+    {
+        if (Rows.Count == 0)
+            return null;
+        var rows = new List<IReadOnlyList<string>>();
+        foreach (var c in Rows)
+        {
+            rows.Add([c.Name, "", c.Count.ToString(), c.Size.ToString(), c.SizeText, c.PercentText]);
+            long total = Math.Max(1, c.Size);
+            foreach (var e in c.Stat.Extensions.OrderByDescending(e => e.Size))
+                rows.Add([c.Name, e.DisplayName, e.Count.ToString(), e.Size.ToString(), Format.Bytes(e.Size), Format.Percent((double)e.Size / total)]);
+        }
+        return new TableSnapshot("Categories", SortHelper.ScopeLabel(Main), ["Category", "Type", "Files", "Size (bytes)", "Size", "Share"], rows);
+    }
+
     void LoadFiles(string title, byte? category, ushort? extension)
     {
         var a = _a!;
         _cts?.Cancel();
         var cts = _cts = new CancellationTokenSource();
         var metric = Main.Metric;
+        int root = Main.Scope?.Root ?? ScanTree.RootId;
         FilesTitle = title;
         Task.Run(() =>
         {
@@ -312,8 +406,8 @@ public sealed partial class CategoriesViewModel(MainViewModel main) : Observable
             Func<int, bool> filter = extension is { } e
                 ? i => a.Tree.ExtensionId(i) == e
                 : i => map[a.Tree.ExtensionId(i)] == category;
-            var top = FileQueries.Largest(a.Tree, 300, metric, filter, cts.Token);
-            long total = a.Tree.GetSize(0, metric);
+            var top = FileQueries.Largest(a.Tree, 300, metric, filter, cts.Token, root);
+            long total = a.Tree.GetSize(root, metric);
             return top.Select(n => new FileRow(a.Tree, n, a.Colors, total)).ToList();
         }, cts.Token).ContinueWith(t =>
         {
@@ -325,7 +419,7 @@ public sealed partial class CategoriesViewModel(MainViewModel main) : Observable
 
 public sealed record FilterOption(string Label, int Value);
 
-public sealed partial class LargestFilesViewModel : ObservableObject
+public sealed partial class LargestFilesViewModel : ObservableObject, ISnapshotSource, ISortableTable
 {
     readonly DispatcherTimer _debounce;
     Analysis? _a;
@@ -376,6 +470,20 @@ public sealed partial class LargestFilesViewModel : ObservableObject
 
     public IReadOnlyList<int> CurrentNodes => Rows.Select(r => r.Node).ToList();
 
+    public void SortBy(string property, System.ComponentModel.ListSortDirection direction) => Rows = SortHelper.Sort(Rows, property, direction);
+
+    public TableSnapshot? Snapshot()
+    {
+        if (Rows.Count == 0)
+            return null;
+        string detail = string.Join(", ", new[] { SortHelper.ScopeLabel(Main), NameFilter.Trim(), CategoryFilter.Value >= 0 ? CategoryFilter.Label : "",
+            AgeFilter.Value > 0 ? AgeFilter.Label : "" }.Where(x => x.Length > 0));
+        return new TableSnapshot("Largest files", detail,
+            ["Name", "Path", "Folder", "Size (bytes)", "Size", "On disk (bytes)", "Category", "Created", "Modified", "Accessed"],
+            Rows.Select(r => (IReadOnlyList<string>)[r.Name, Path.Combine(r.Folder, r.Name), r.Folder, r.Size.ToString(), r.SizeText, r.Allocated.ToString(),
+                r.Category, Snapshots.Date(r.Created), Snapshots.Date(r.Modified), Snapshots.Date(r.Accessed)]).ToList());
+    }
+
     public void Load(Analysis? a)
     {
         _a = a;
@@ -417,6 +525,7 @@ public sealed partial class LargestFilesViewModel : ObservableObject
         string name = NameFilter.Trim();
         int category = CategoryFilter?.Value ?? -1;
         int days = AgeFilter?.Value ?? 0;
+        int root = Main.Scope?.Root ?? ScanTree.RootId;
         IsBusy = true;
         Task.Run(() =>
         {
@@ -427,8 +536,8 @@ public sealed partial class LargestFilesViewModel : ObservableObject
                 (category < 0 || map[a.Tree.ExtensionId(i)] == category)
                 && (days <= 0 || (a.Tree.ModifiedTicks(i) > 0 && a.Tree.ModifiedTicks(i) < cutoff))
                 && (name.Length == 0 || a.Tree.Name(i).Contains(name, StringComparison.OrdinalIgnoreCase));
-            var top = FileQueries.Largest(a.Tree, 1000, metric, filter, cts.Token);
-            long total = a.Tree.GetSize(0, metric);
+            var top = FileQueries.Largest(a.Tree, 1000, metric, filter, cts.Token, root);
+            long total = a.Tree.GetSize(root, metric);
             return (top.Select(n => new FileRow(a.Tree, n, a.Colors, total)).ToList(), top.Sum(n => a.Tree.GetSize(n, metric)));
         }, cts.Token).ContinueWith(t =>
         {
@@ -448,7 +557,7 @@ public sealed partial class LargestFilesViewModel : ObservableObject
     }
 }
 
-public sealed partial class LocationsViewModel(MainViewModel main) : ObservableObject
+public sealed partial class LocationsViewModel(MainViewModel main) : ObservableObject, ISnapshotSource
 {
     public MainViewModel Main { get; } = main;
 
@@ -475,9 +584,14 @@ public sealed partial class LocationsViewModel(MainViewModel main) : ObservableO
         if (value is { Node: >= 0 })
             Main.SelectedNode = value.Node;
     }
+
+    public TableSnapshot? Snapshot() => Rows.Count == 0 ? null : new TableSnapshot("Locations", "",
+        ["Group", "Location", "Path", "Size (bytes)", "Size", "Share of scan", "Files", "Note"],
+        Rows.Select(r => (IReadOnlyList<string>)[r.Group, new string(' ', r.Level * 2) + r.Name, r.Path, r.Size.ToString(), r.SizeText, r.PercentText,
+            r.FilesText.Replace(",", ""), r.Note ?? ""]).ToList());
 }
 
-public sealed partial class AgeViewModel(MainViewModel main) : ObservableObject
+public sealed partial class AgeViewModel(MainViewModel main) : ObservableObject, ISnapshotSource
 {
     public MainViewModel Main { get; } = main;
 
@@ -492,9 +606,14 @@ public sealed partial class AgeViewModel(MainViewModel main) : ObservableObject
             return;
         }
         var metric = Main.Metric;
-        long total = Math.Max(1, a.Ages.Sum(b => metric == SizeMetric.Logical ? b.Size : b.Allocated));
-        Rows = a.Ages.Select(b => new AgeRow(b, (double)(metric == SizeMetric.Logical ? b.Size : b.Allocated) / total, metric)).ToList();
+        var ages = (Main.Scope ?? a.Everything).Ages;
+        long total = Math.Max(1, ages.Sum(b => metric == SizeMetric.Logical ? b.Size : b.Allocated));
+        Rows = ages.Select(b => new AgeRow(b, (double)(metric == SizeMetric.Logical ? b.Size : b.Allocated) / total, metric)).ToList();
     }
+
+    public TableSnapshot? Snapshot() => Rows.Count == 0 ? null : new TableSnapshot("Age", SortHelper.ScopeLabel(Main),
+        ["Last changed", "Files", "Size (bytes)", "Size", "Share"],
+        Rows.Select(r => (IReadOnlyList<string>)[r.Label, r.Count.ToString(), r.Size.ToString(), r.SizeText, r.PercentText]).ToList());
 }
 
-public sealed record NavItem(string Title, string Glyph, string Hint);
+public sealed record NavItem(string Key, string Title, string Glyph, string Hint);

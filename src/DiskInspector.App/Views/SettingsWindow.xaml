@@ -1,0 +1,41 @@
+<Window x:Class="DiskInspector.App.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings" Width="620" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <StackPanel Margin="20">
+        <TextBlock Text="Snapshots" Style="{StaticResource SubHeading}" />
+        <TextBlock Style="{StaticResource Muted}" Margin="0,0,0,8"
+                   Text="Snapshot saves exactly what the current view shows as a CSV file (opens in Excel). Files are named with the date, time and view." />
+        <DockPanel Margin="0,0,0,18">
+            <Button DockPanel.Dock="Right" Content="Open" Margin="6,0,0,0" Click="OpenFolder_Click" />
+            <Button DockPanel.Dock="Right" Content="Browse…" Margin="6,0,0,0" Click="Browse_Click" />
+            <TextBox x:Name="FolderBox" Text="{Binding SnapshotFolder, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" />
+        </DockPanel>
+
+        <TextBlock Text="Work files" Style="{StaticResource SubHeading}" />
+        <CheckBox IsChecked="{Binding ReadAuthors}" Margin="0,0,0,4" Content="Read author, last saved by and title from document files" />
+        <TextBlock Style="{StaticResource Muted}" Margin="26,0,0,8"
+                   Text="Office, PDF and email files are opened read-only. Their last-accessed date is not changed, and online-only OneDrive files are never opened (so nothing downloads)." />
+        <StackPanel Orientation="Horizontal" Margin="26,0,0,12">
+            <TextBlock Text="Read automatically when a table has up to" VerticalAlignment="Center" />
+            <TextBox Width="80" Margin="8,0" Text="{Binding AuthorAutoLimit, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" />
+            <TextBlock Text="readable files (more: click Read authors)" VerticalAlignment="Center" />
+        </StackPanel>
+        <CheckBox IsChecked="{Binding OnlyUserFolders}" Margin="0,0,0,4" Content="Start with &quot;Only my files&quot; turned on" />
+        <TextBlock Style="{StaticResource Muted}" Margin="26,0,0,18"
+                   Text="Skips Windows, Program Files, ProgramData, AppData and package or cache folders such as node_modules, site-packages and .git. Applies after a restart." />
+
+        <TextBlock Style="{StaticResource Muted}" Margin="0,0,0,16">
+            <Run Text="Advanced: add or change work-file groups in" />
+            <Run x:Name="GroupsFile" FontFamily="Consolas" />
+            <Run Text="and categories in" />
+            <Run x:Name="CategoriesFile" FontFamily="Consolas" />
+            <Run Text="(see README)." />
+        </TextBlock>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Save" Width="90" IsDefault="True" Click="Save_Click" Style="{DynamicResource AccentButtonStyle}" />
+            <Button Content="Cancel" Width="90" Margin="8,0,0,0" IsCancel="True" />
+        </StackPanel>
+    </StackPanel>
+</Window>

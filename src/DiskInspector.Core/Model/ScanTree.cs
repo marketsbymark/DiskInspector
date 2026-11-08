@@ -12,12 +12,17 @@ public sealed class ScanTree
 {
     public const int RootId = 0;
 
+    /// <summary>Root name of an "all drives" scan; its children are the drives ("C:", "D:").</summary>
+    public const string ComputerRoot = "This PC";
+
     int _count;
     int[] _parent;
     string[] _name;
     long[] _size;
     long[] _alloc;
     long[] _mtime;
+    long[] _ctime;
+    long[] _atime;
     ushort[] _ext;
     NodeFlags[] _flags;
 
@@ -36,6 +41,8 @@ public sealed class ScanTree
         _size = new long[capacity];
         _alloc = new long[capacity];
         _mtime = new long[capacity];
+        _ctime = new long[capacity];
+        _atime = new long[capacity];
         _ext = new ushort[capacity];
         _flags = new NodeFlags[capacity];
 
@@ -48,12 +55,16 @@ public sealed class ScanTree
     }
 
     public string RootPath { get; }
+
+    /// <summary>True for an "all drives" scan, where the root is <see cref="ComputerRoot"/> and its children are drives.</summary>
+    public bool IsComputerRoot => RootPath == ComputerRoot;
     public ExtensionTable Extensions { get; } = new();
     public int Count => _count;
     public bool IsComplete { get; private set; }
 
     /// <summary>Adds a node. Directory sizes are ignored; they are rolled up by <see cref="Complete"/>.</summary>
-    public int Add(int parent, string name, NodeFlags flags, long size, long allocated, long modifiedTicks)
+    public int Add(int parent, string name, NodeFlags flags, long size, long allocated, long modifiedTicks,
+        long createdTicks = 0, long accessedTicks = 0)
     {
         if (IsComplete)
             throw new InvalidOperationException("The tree is already complete.");
@@ -72,6 +83,8 @@ public sealed class ScanTree
         _size[id] = dir ? 0 : Math.Max(0, size);
         _alloc[id] = dir ? 0 : Math.Max(0, allocated);
         _mtime[id] = modifiedTicks;
+        _ctime[id] = createdTicks;
+        _atime[id] = accessedTicks;
         _ext[id] = dir ? ExtensionTable.None : Extensions.GetOrAdd(name);
         return id;
     }
@@ -86,6 +99,8 @@ public sealed class ScanTree
         Array.Resize(ref _size, n);
         Array.Resize(ref _alloc, n);
         Array.Resize(ref _mtime, n);
+        Array.Resize(ref _ctime, n);
+        Array.Resize(ref _atime, n);
         Array.Resize(ref _ext, n);
         Array.Resize(ref _flags, n);
     }
@@ -101,6 +116,8 @@ public sealed class ScanTree
         Array.Resize(ref _size, n);
         Array.Resize(ref _alloc, n);
         Array.Resize(ref _mtime, n);
+        Array.Resize(ref _ctime, n);
+        Array.Resize(ref _atime, n);
         Array.Resize(ref _ext, n);
         Array.Resize(ref _flags, n);
 
@@ -151,7 +168,13 @@ public sealed class ScanTree
     public long Allocated(int id) => _alloc[id];
     public long GetSize(int id, SizeMetric metric) => metric == SizeMetric.Logical ? _size[id] : _alloc[id];
     public long ModifiedTicks(int id) => _mtime[id];
-    public DateTime ModifiedUtc(int id) => _mtime[id] > 0 ? new DateTime(_mtime[id], DateTimeKind.Utc) : DateTime.MinValue;
+    public DateTime ModifiedUtc(int id) => ToUtc(_mtime[id]);
+    public long CreatedTicks(int id) => _ctime[id];
+    public DateTime CreatedUtc(int id) => ToUtc(_ctime[id]);
+    public long AccessedTicks(int id) => _atime[id];
+    public DateTime AccessedUtc(int id) => ToUtc(_atime[id]);
+
+    static DateTime ToUtc(long ticks) => ticks > 0 && ticks <= DateTime.MaxValue.Ticks ? new DateTime(ticks, DateTimeKind.Utc) : DateTime.MinValue;
     public ushort ExtensionId(int id) => _ext[id];
     public string Extension(int id) => Extensions[_ext[id]];
 
@@ -212,6 +235,15 @@ public sealed class ScanTree
         var parts = new List<string>();
         for (int i = id; i > RootId; i = _parent[i])
             parts.Add(_name[i]);
+        if (IsComputerRoot)
+        {
+            // parts[^1] is the drive ("C:"): the path starts there.
+            string drive = parts[^1];
+            parts.RemoveAt(parts.Count - 1);
+            if (parts.Count == 0)
+                return drive + "\\";
+            return drive + "\\" + string.Join('\\', Enumerable.Reverse(parts));
+        }
         var sb = new StringBuilder(RootPath, RootPath.Length + parts.Count * 16);
         if (!RootPath.EndsWith('\\'))
             sb.Append('\\');
@@ -233,6 +265,17 @@ public sealed class ScanTree
         string root = RootPath.TrimEnd('\\');
         if (full.Equals(root, StringComparison.OrdinalIgnoreCase))
             return RootId;
+        if (IsComputerRoot)
+        {
+            int id0 = RootId;
+            foreach (var part in full.Split('\\', StringSplitOptions.RemoveEmptyEntries))
+            {
+                id0 = FindChild(id0, part);
+                if (id0 < 0)
+                    return -1;
+            }
+            return id0;
+        }
         if (!full.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase))
             return -1;
 
@@ -245,6 +288,39 @@ public sealed class ScanTree
             id = found;
         }
         return id;
+    }
+
+    /// <summary>
+    /// Calls <paramref name="visit"/> for every node below <paramref name="root"/> (not the root itself).
+    /// The whole tree is walked in storage order; a subtree with an explicit stack, so depth never matters.
+    /// </summary>
+    public void VisitDescendants(int root, Action<int> visit, CancellationToken ct = default)
+    {
+        if (root == RootId)
+        {
+            for (int i = 1; i < _count; i++)
+            {
+                if ((i & 0xFFFF) == 0)
+                    ct.ThrowIfCancellationRequested();
+                visit(i);
+            }
+            return;
+        }
+        var stack = new Stack<int>();
+        stack.Push(root);
+        int n = 0;
+        while (stack.Count > 0)
+        {
+            int cur = stack.Pop();
+            foreach (int c in Children(cur))
+            {
+                if ((++n & 0xFFFF) == 0)
+                    ct.ThrowIfCancellationRequested();
+                visit(c);
+                if ((_flags[c] & NodeFlags.Directory) != 0)
+                    stack.Push(c);
+            }
+        }
     }
 
     public int FindChild(int id, string name)

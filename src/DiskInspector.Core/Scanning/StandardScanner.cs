@@ -32,6 +32,9 @@ public sealed class StandardScanner : IScanner
     /// <summary>Test hook, called just before a folder is listed.</summary>
     internal Action<string>? BeforeDirectory { get; set; }
 
+    /// <summary>Test hook: folders to treat as the drives of an all-drives scan.</summary>
+    internal Func<IEnumerable<string>>? DrivesOverride { get; set; }
+
     public Task<ScanResult> ScanAsync(string path, IProgress<ScanProgress>? progress = null, CancellationToken cancellationToken = default) =>
         Task.Run(() => Scan(path, progress, cancellationToken), cancellationToken);
 
@@ -39,18 +42,45 @@ public sealed class StandardScanner : IScanner
     {
         var clock = Stopwatch.StartNew();
         string root = ScanPaths.Normalize(path);
-        var rootInfo = new DirectoryInfo(root);
-        if (!rootInfo.Exists)
-            throw new DirectoryNotFoundException($"Folder not found: {root}");
+        Context ctx;
+        VolumeInfo? volume = null;
+        var volumes = new List<VolumeInfo>();
+        var start = new List<DirWork>();
 
-        long rootTicks = 0;
-        try { rootTicks = rootInfo.LastWriteTimeUtc.Ticks; } catch (IOException) { }
-
-        var volume = VolumeInfo.TryGet(root);
-        var ctx = new Context(new ScanTree(root, rootTicks, 1 << 16), volume?.ClusterSize ?? 4096, ct);
+        if (root == ScanTree.ComputerRoot)
+        {
+            // All drives: one top-level node per ready local drive.
+            ctx = new Context(new ScanTree(root, 0, 1 << 16), ct);
+            foreach (var drive in DrivesOverride?.Invoke() ?? ScanPaths.LocalDrives())
+            {
+                var v = VolumeInfo.TryGet(drive);
+                if (v is null)
+                    continue;
+                volumes.Add(v);
+                long ticks = 0;
+                try { ticks = new DirectoryInfo(drive).LastWriteTimeUtc.Ticks; } catch (IOException) { }
+                int id = ctx.Tree.Add(ScanTree.RootId, drive.TrimEnd('\\'), NodeFlags.Directory, 0, 0, ticks);
+                start.Add(new DirWork(id, drive, v.ClusterSize));
+            }
+            if (start.Count == 0)
+                throw new DirectoryNotFoundException("No local drives are ready to scan.");
+        }
+        else
+        {
+            var rootInfo = new DirectoryInfo(root);
+            if (!rootInfo.Exists)
+                throw new DirectoryNotFoundException($"Folder not found: {root}");
+            long rootTicks = 0;
+            try { rootTicks = rootInfo.LastWriteTimeUtc.Ticks; } catch (IOException) { }
+            volume = VolumeInfo.TryGet(root);
+            if (volume is not null)
+                volumes.Add(volume);
+            ctx = new Context(new ScanTree(root, rootTicks, 1 << 16), ct);
+            start.Add(new DirWork(ScanTree.RootId, root, volume?.ClusterSize ?? 4096));
+        }
 
         using (progress is null ? null : new Timer(_ => progress.Report(ctx.Snapshot(clock.Elapsed)), null, 100, 100))
-            RunWorkers(ctx);
+            RunWorkers(ctx, start);
 
         ct.ThrowIfCancellationRequested();
         ctx.Tree.Complete();
@@ -63,13 +93,15 @@ public sealed class StandardScanner : IScanner
             Duration = clock.Elapsed,
             Issues = [.. ctx.Issues],
             Volume = volume,
+            Volumes = volumes,
         };
     }
 
-    void RunWorkers(Context ctx)
+    void RunWorkers(Context ctx, List<DirWork> start)
     {
-        ctx.Pending = 1;
-        ctx.Channel.Writer.TryWrite(new DirWork(ScanTree.RootId, ctx.Tree.RootPath));
+        ctx.Pending = start.Count;
+        foreach (var w in start)
+            ctx.Channel.Writer.TryWrite(w);
 
         var workers = new Task[_workerCount];
         for (int i = 0; i < workers.Length; i++)
@@ -129,7 +161,8 @@ public sealed class StandardScanner : IScanner
         try
         {
             var entries = new FileSystemEnumerable<RawEntry>(work.Path,
-                static (ref FileSystemEntry e) => new RawEntry(e.FileName.ToString(), e.Attributes, e.Length, e.LastWriteTimeUtc.UtcTicks),
+                static (ref FileSystemEntry e) => new RawEntry(e.FileName.ToString(), e.Attributes, e.Length,
+                    e.LastWriteTimeUtc.UtcTicks, e.CreationTimeUtc.UtcTicks, e.LastAccessTimeUtc.UtcTicks),
                 Options);
             foreach (var entry in entries)
                 batch.Add(entry);
@@ -181,16 +214,16 @@ public sealed class StandardScanner : IScanner
                 {
                     alloc = Native.GetCompressedFileSize(Path.Join(work.Path, e.Name));
                     if (alloc < 0)
-                        alloc = RoundUp(e.Length, ctx.ClusterSize);
+                        alloc = RoundUp(e.Length, work.Cluster);
                     else
-                        alloc = RoundUp(alloc, ctx.ClusterSize);
+                        alloc = RoundUp(alloc, work.Cluster);
                 }
                 else
                 {
-                    alloc = RoundUp(e.Length, ctx.ClusterSize);
+                    alloc = RoundUp(e.Length, work.Cluster);
                 }
             }
-            prepared.Add(new Prepared(e.Name, flags, e.Length, alloc, e.ModifiedTicks, descend));
+            prepared.Add(new Prepared(e.Name, flags, e.Length, alloc, e.ModifiedTicks, e.CreatedTicks, e.AccessedTicks, descend));
         }
 
         subdirs.Clear();
@@ -200,9 +233,9 @@ public sealed class StandardScanner : IScanner
                 ctx.Tree.AddFlags(work.Id, dirFlags);
             foreach (var p in prepared)
             {
-                int id = ctx.Tree.Add(work.Id, p.Name, p.Flags, p.Size, p.Allocated, p.ModifiedTicks);
+                int id = ctx.Tree.Add(work.Id, p.Name, p.Flags, p.Size, p.Allocated, p.ModifiedTicks, p.CreatedTicks, p.AccessedTicks);
                 if (p.Descend)
-                    subdirs.Add(new DirWork(id, p.Name));
+                    subdirs.Add(new DirWork(id, p.Name, work.Cluster));
             }
         }
 
@@ -213,7 +246,7 @@ public sealed class StandardScanner : IScanner
         foreach (var sub in subdirs)
         {
             Interlocked.Increment(ref ctx.Pending);
-            ctx.Channel.Writer.TryWrite(new DirWork(sub.Id, Path.Join(work.Path, sub.Path)));
+            ctx.Channel.Writer.TryWrite(new DirWork(sub.Id, Path.Join(work.Path, sub.Path), work.Cluster));
         }
     }
 
@@ -230,16 +263,17 @@ public sealed class StandardScanner : IScanner
     internal static long RoundUp(long size, long cluster) =>
         size <= 0 ? 0 : cluster <= 1 ? size : (size + cluster - 1) / cluster * cluster;
 
-    readonly record struct RawEntry(string Name, FileAttributes Attributes, long Length, long ModifiedTicks);
+    readonly record struct RawEntry(string Name, FileAttributes Attributes, long Length, long ModifiedTicks, long CreatedTicks, long AccessedTicks);
 
-    readonly record struct Prepared(string Name, NodeFlags Flags, long Size, long Allocated, long ModifiedTicks, bool Descend);
+    readonly record struct Prepared(string Name, NodeFlags Flags, long Size, long Allocated, long ModifiedTicks, long CreatedTicks,
+        long AccessedTicks, bool Descend);
 
-    readonly record struct DirWork(int Id, string Path);
+    /// <summary>A folder waiting to be listed. <see cref="Cluster"/> is its drive's cluster size.</summary>
+    readonly record struct DirWork(int Id, string Path, int Cluster);
 
-    sealed class Context(ScanTree tree, int clusterSize, CancellationToken token)
+    sealed class Context(ScanTree tree, CancellationToken token)
     {
         public readonly ScanTree Tree = tree;
-        public readonly int ClusterSize = clusterSize;
         public readonly CancellationToken Token = token;
         public readonly Channel<DirWork> Channel = System.Threading.Channels.Channel.CreateUnbounded<DirWork>(
             new UnboundedChannelOptions { SingleReader = false, SingleWriter = false });

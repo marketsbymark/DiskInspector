@@ -7,31 +7,69 @@ using DiskInspector.Core.Scanning;
 
 namespace DiskInspector.App.ViewModels;
 
-public sealed record DriveItem(string RootPath, string Label, string Format, long Total, long Free)
+public enum TargetKind
+{
+    Drive,
+    AllDrives,
+    OneDrive,
+}
+
+/// <summary>Something to scan: a drive, all drives together, or a OneDrive folder.</summary>
+public sealed record DriveItem(string RootPath, string Label, string Format, long Total, long Free, TargetKind Kind = TargetKind.Drive)
 {
     public long Used => Total - Free;
     public double UsedFraction => Total > 0 ? (double)Used / Total : 0;
     public bool IsNtfs => string.Equals(Format, "NTFS", StringComparison.OrdinalIgnoreCase);
-    public string Title => string.IsNullOrWhiteSpace(Label) ? $"Local Disk ({RootPath.TrimEnd('\\')})" : $"{Label} ({RootPath.TrimEnd('\\')})";
-    public string UsageText => $"{Core.Analysis.Format.Bytes(Free)} free of {Core.Analysis.Format.Bytes(Total)}";
-    public string Short => RootPath;
+    public bool ShowUsage => Kind != TargetKind.OneDrive && Total > 0;
+
+    public string Title => Kind switch
+    {
+        TargetKind.AllDrives => "All drives (This PC)",
+        TargetKind.OneDrive => Label,
+        _ => string.IsNullOrWhiteSpace(Label) ? $"Local Disk ({RootPath.TrimEnd('\\')})" : $"{Label} ({RootPath.TrimEnd('\\')})",
+    };
+
+    public string Glyph => Kind switch
+    {
+        TargetKind.AllDrives => "\uE7F8",   // devices
+        TargetKind.OneDrive => "\uE753",    // cloud
+        _ => "\uEDA2",                      // drive
+    };
+
+    public string UsageText => Kind switch
+    {
+        TargetKind.OneDrive => RootPath,
+        TargetKind.AllDrives => $"{Format} · {Core.Analysis.Format.Bytes(Free)} free of {Core.Analysis.Format.Bytes(Total)}",
+        _ => $"{Core.Analysis.Format.Bytes(Free)} free of {Core.Analysis.Format.Bytes(Total)}",
+    };
+
+    public string Subtitle => Kind switch
+    {
+        TargetKind.AllDrives => "Every local drive in one scan",
+        TargetKind.OneDrive => "Cloud folder",
+        _ => Format,
+    };
 
     public static IEnumerable<DriveItem> Enumerate()
     {
-        foreach (var d in DriveInfo.GetDrives())
+        var drives = new List<DriveItem>();
+        foreach (var root in ScanPaths.LocalDrives())
         {
-            DriveItem? item = null;
             try
             {
-                if (d.IsReady && d.DriveType is DriveType.Fixed or DriveType.Removable)
-                    item = new DriveItem(d.RootDirectory.FullName, d.VolumeLabel, d.DriveFormat, d.TotalSize, d.TotalFreeSpace);
+                var d = new DriveInfo(root);
+                drives.Add(new DriveItem(d.RootDirectory.FullName, d.VolumeLabel, d.DriveFormat, d.TotalSize, d.TotalFreeSpace));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
             }
-            if (item is not null)
-                yield return item;
         }
+        foreach (var d in drives)
+            yield return d;
+        if (drives.Count > 1)
+            yield return new DriveItem(ScanTree.ComputerRoot, "All drives", $"{drives.Count} drives", drives.Sum(d => d.Total), drives.Sum(d => d.Free), TargetKind.AllDrives);
+        foreach (var od in CloudFolders.FindOneDrive())
+            yield return new DriveItem(od.Path, od.Name, "OneDrive", 0, 0, TargetKind.OneDrive);
     }
 }
 
@@ -47,6 +85,8 @@ public sealed class FileRow
         Size = tree.Size(node);
         Allocated = tree.Allocated(node);
         Modified = tree.ModifiedUtc(node);
+        Created = tree.CreatedUtc(node);
+        Accessed = tree.AccessedUtc(node);
         int parent = tree.Parent(node);
         Folder = parent >= 0 ? tree.GetFullPath(parent) : "";
         var cat = colors.Categorizer.Categories[colors.CategoryOf(node)];
@@ -61,12 +101,16 @@ public sealed class FileRow
     public long Size { get; }
     public long Allocated { get; }
     public DateTime Modified { get; }
+    public DateTime Created { get; }
+    public DateTime Accessed { get; }
     public string Category { get; }
     public Brush CategoryBrush { get; }
     public double Fraction { get; }
     public string SizeText => Format.Bytes(Size);
     public string AllocatedText => Format.Bytes(Allocated);
     public string ModifiedText => Format.Date(Modified);
+    public string CreatedText => Format.Date(Created);
+    public string AccessedText => Format.Date(Accessed);
     public string PercentText => Format.Percent(Fraction);
 }
 
@@ -122,6 +166,7 @@ public sealed class LocationRow(LocationStat stat, double fraction, SizeMetric m
 public sealed class AgeRow(AgeBucket bucket, double fraction, SizeMetric metric)
 {
     public string Label => bucket.Label;
+    public long Count => bucket.Count;
     public long Size => metric == SizeMetric.Logical ? bucket.Size : bucket.Allocated;
     public double Fraction { get; } = fraction;
     public string SizeText => Format.Bytes(Size);
@@ -215,6 +260,8 @@ public sealed class NodeDetails
     public required string ShareText { get; init; }
     public required string ContentsText { get; init; }
     public required string ModifiedText { get; init; }
+    public required string CreatedText { get; init; }
+    public required string AccessedText { get; init; }
     public required string Notes { get; init; }
     public required Brush Brush { get; init; }
     public required IReadOnlyList<BreakdownItem> Breakdown { get; init; }
@@ -268,6 +315,8 @@ public sealed class NodeDetails
             ShareText = share,
             ContentsText = dir ? $"{tree.FileCount(node):N0} files in {tree.DirectoryCount(node):N0} folders" : "",
             ModifiedText = Format.Date(tree.ModifiedUtc(node)),
+            CreatedText = Format.Date(tree.CreatedUtc(node)),
+            AccessedText = Format.Date(tree.AccessedUtc(node)),
             Notes = string.Join("\n", notes),
             Brush = BrushCache.Get(cat.Color),
             Breakdown = breakdown,
@@ -275,3 +324,65 @@ public sealed class NodeDetails
         };
     }
 }
+
+/// <summary>One file in the Work files table. Author fields fill in later, after the file has been read.</summary>
+public sealed partial class WorkFileRow : ObservableObject
+{
+    public WorkFileRow(ScanTree tree, int node)
+    {
+        Node = node;
+        Name = tree.Name(node);
+        string ext = tree.Extension(node);
+        Type = ext.Length == 0 ? "" : "." + ext;
+        Path = tree.GetFullPath(node);
+        int parent = tree.Parent(node);
+        Folder = parent >= 0 ? tree.GetFullPath(parent) : "";
+        Size = tree.Size(node);
+        Modified = tree.ModifiedUtc(node);
+        Created = tree.CreatedUtc(node);
+        Accessed = tree.AccessedUtc(node);
+        IsOnlineOnly = (tree.Flags(node) & NodeFlags.CloudPlaceholder) != 0;
+        CanReadProperties = DocumentProperties.CanRead(ext);
+    }
+
+    public int Node { get; }
+    public string Name { get; }
+    public string Type { get; }
+    public string Path { get; }
+    public string Folder { get; }
+    public long Size { get; }
+    public DateTime Modified { get; }
+    public DateTime Created { get; }
+    public DateTime Accessed { get; }
+    public bool IsOnlineOnly { get; }
+    public bool CanReadProperties { get; }
+
+    [ObservableProperty]
+    private string _author = "";
+
+    [ObservableProperty]
+    private string _lastSavedBy = "";
+
+    [ObservableProperty]
+    private string _title = "";
+
+    public string Availability => IsOnlineOnly ? "Online only" : "On this PC";
+    public string SizeText => Format.Bytes(Size);
+    public string ModifiedText => Format.Date(Modified);
+    public string CreatedText => Format.Date(Created);
+    public string AccessedText => Format.Date(Accessed);
+
+    public void Apply(DocumentInfo info)
+    {
+        Author = info.Author ?? "";
+        LastSavedBy = info.LastSavedBy ?? "";
+        Title = info.Title ?? "";
+    }
+}
+
+public sealed record WorkGroupOption(WorkFileGroup Group, long Count)
+{
+    public string Label => $"{Group.Name} ({Count:N0})";
+}
+
+public sealed record TypeOption(string Label, string Extension);

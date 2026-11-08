@@ -213,6 +213,14 @@ public static class GridViewSort
     public static string? GetProperty(DependencyObject o) => (string?)o.GetValue(PropertyProperty);
     public static void SetProperty(DependencyObject o, string? v) => o.SetValue(PropertyProperty, v);
 
+    sealed class SortState
+    {
+        public string? Property;
+        public ListSortDirection Direction;
+    }
+
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ListView, SortState> LastSort = new();
+
     static void OnEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is ListView lv && (bool)e.NewValue)
@@ -226,6 +234,16 @@ public static class GridViewSort
         string? prop = GetProperty(column);
         if (string.IsNullOrEmpty(prop))
             return;
+        if (lv.DataContext is ViewModels.ISortableTable table)
+        {
+            // Large tables sort in the view model, which also keeps snapshots in the order shown.
+            var last = LastSort.GetOrCreateValue(lv);
+            var direction = last.Property == prop && last.Direction == ListSortDirection.Descending ? ListSortDirection.Ascending : ListSortDirection.Descending;
+            last.Property = prop;
+            last.Direction = direction;
+            table.SortBy(prop, direction);
+            return;
+        }
         var view = CollectionViewSource.GetDefaultView(lv.ItemsSource);
         var dir = ListSortDirection.Descending;
         if (view.SortDescriptions.Count > 0 && view.SortDescriptions[0].PropertyName == prop)

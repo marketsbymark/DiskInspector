@@ -277,7 +277,8 @@ public sealed class MftScanner : IScanner
                 if (t.Links.ContainsKey(c))
                     flags |= NodeFlags.HardLink;
                 bool sized = entSized[e];
-                int id = tree.Add(node, name, flags, sized ? t.Size[c] : 0, sized ? t.Alloc[c] : 0, FileTimeToTicks(t.Modified[c]));
+                int id = tree.Add(node, name, flags, sized ? t.Size[c] : 0, sized ? t.Alloc[c] : 0, FileTimeToTicks(t.Modified[c]),
+                    FileTimeToTicks(t.Created[c]), FileTimeToTicks(t.Accessed[c]));
                 if (dir)
                     queue.Enqueue((c, id));
             }
@@ -322,6 +323,8 @@ public sealed class MftScanner : IScanner
         public readonly long[] Size = new long[count];
         public readonly long[] Alloc = new long[count];
         public readonly long[] Modified = new long[count];
+        public readonly long[] Created = new long[count];
+        public readonly long[] Accessed = new long[count];
         public readonly uint[] Attributes = new uint[count];
 
         /// <summary>Every name of the files that have more than one (hard links).</summary>
@@ -398,6 +401,8 @@ public sealed class MftScanner : IScanner
             if (info.HasStandardInfo)
             {
                 Modified[t] = info.ModifiedFileTime;
+                Created[t] = info.CreatedFileTime;
+                Accessed[t] = info.AccessedFileTime;
                 Attributes[t] = info.Attributes;
             }
             foreach (var fn in _names)

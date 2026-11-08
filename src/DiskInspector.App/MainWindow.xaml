@@ -9,7 +9,7 @@
         d:DataContext="{d:DesignInstance vm:MainViewModel}"
         Title="{Binding WindowTitle}"
         Icon="Assets/DiskInspector.ico"
-        Width="1440" Height="900" MinWidth="1000" MinHeight="620"
+        Width="1440" Height="900" MinWidth="1040" MinHeight="620"
         WindowStartupLocation="CenterScreen">
 
     <Grid>
@@ -31,12 +31,12 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <ComboBox Width="180" ItemsSource="{Binding Drives}" SelectedItem="{Binding SelectedDrive}"
+                    <ComboBox Width="190" ItemsSource="{Binding Drives}" SelectedItem="{Binding SelectedDrive}"
                               IsEnabled="{Binding IsScanning, Converter={x:Static v:Not.Instance}}" ToolTip="Drive to scan">
                         <ComboBox.ItemTemplate>
                             <DataTemplate DataType="vm:DriveItem">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Style="{StaticResource Icon}" Text="&#xEDA2;" Margin="0,0,8,0" />
+                                    <TextBlock Style="{StaticResource Icon}" Text="{Binding Glyph}" Margin="0,0,8,0" />
                                     <TextBlock Text="{Binding Title}" />
                                 </StackPanel>
                             </DataTemplate>
@@ -71,7 +71,8 @@
                     </Button>
                 </StackPanel>
 
-                <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="8,0,0,0" Visibility="{Binding IsDone, Converter={StaticResource BoolToVis}}">
+                <StackPanel Grid.Column="4" Orientation="Horizontal" Margin="8,0,0,0">
+                <StackPanel Orientation="Horizontal" Visibility="{Binding IsDone, Converter={StaticResource BoolToVis}}">
                     <ToggleButton IsChecked="{Binding UseAllocated}" Margin="0,0,6,0"
                                   ToolTip="Off: file sizes (like Explorer's Size). On: space actually used on the drive (Size on disk).">
                         <StackPanel Orientation="Horizontal">
@@ -79,16 +80,23 @@
                             <TextBlock Text="Size on disk" />
                         </StackPanel>
                     </ToggleButton>
-                    <Button x:Name="ExportButton" Click="ExportButton_Click" Margin="0,0,6,0">
+                    <Button Command="{Binding SnapshotCommand}" Margin="0,0,0,0" ToolTip="Save what this view shows as a CSV file in your snapshot folder (set in Settings)">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Style="{StaticResource Icon}" Text="&#xEDE1;" Margin="0,0,8,0" />
-                            <TextBlock Text="Export" />
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE722;" Margin="0,0,8,0" />
+                            <TextBlock Text="Snapshot" />
                         </StackPanel>
+                    </Button>
+                    <Button x:Name="ExportButton" Click="ExportButton_Click" Margin="2,0,6,0" Padding="6,5" ToolTip="More snapshot and export options">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE70D;" FontSize="12" />
                         <Button.ContextMenu>
                             <ContextMenu>
-                                <MenuItem Header="All folders (CSV)" Command="{Binding ExportCommand}" CommandParameter="folders" />
-                                <MenuItem Header="File types (CSV)" Command="{Binding ExportCommand}" CommandParameter="types" />
-                                <MenuItem Header="Largest files list (CSV)" Command="{Binding ExportCommand}" CommandParameter="files" />
+                                <MenuItem Header="Snapshot this view" Command="{Binding SnapshotCommand}" />
+                                <MenuItem Header="Snapshot all work-file groups" Command="{Binding SnapshotAllWorkFilesCommand}" />
+                                <MenuItem Header="Open snapshot folder" Command="{Binding OpenSnapshotFolderCommand}" />
+                                <Separator />
+                                <MenuItem Header="Export every folder (CSV)…" Command="{Binding ExportCommand}" CommandParameter="folders" />
+                                <MenuItem Header="Export file types (CSV)…" Command="{Binding ExportCommand}" CommandParameter="types" />
+                                <MenuItem Header="Export largest files list (CSV)…" Command="{Binding ExportCommand}" CommandParameter="files" />
                             </ContextMenu>
                         </Button.ContextMenu>
                     </Button>
@@ -97,6 +105,10 @@
                             <TextBlock Style="{StaticResource Icon}" Text="&#xE80F;" Margin="0,0,8,0" />
                             <TextBlock Text="New scan" />
                         </StackPanel>
+                    </Button>
+                </StackPanel>
+                    <Button Command="{Binding OpenSettingsCommand}" Margin="6,0,0,0" Padding="8,5" ToolTip="Settings: snapshot folder, author reading">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE713;" />
                     </Button>
                 </StackPanel>
             </Grid>

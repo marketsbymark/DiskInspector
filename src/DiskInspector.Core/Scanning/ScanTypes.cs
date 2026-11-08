@@ -22,6 +22,9 @@ public sealed class ScanResult
     public IReadOnlyList<ScanIssue> Issues { get; init; } = [];
     public VolumeInfo? Volume { get; init; }
 
+    /// <summary>Every drive the scan covered (several for an all-drives scan).</summary>
+    public IReadOnlyList<VolumeInfo> Volumes { get; init; } = [];
+
     /// <summary>Message for the user, e.g. that the fast scan fell back to the normal one.</summary>
     public string? Notice { get; set; }
 
@@ -68,6 +71,8 @@ public static class ScanPaths
     public static string Normalize(string path)
     {
         path = path.Trim().Trim('"');
+        if (path.Equals(ScanTree.ComputerRoot, StringComparison.OrdinalIgnoreCase))
+            return ScanTree.ComputerRoot;
         if (path.Length == 2 && path[1] == ':')
             path += "\\";
         string full = Path.GetFullPath(path);
@@ -77,8 +82,26 @@ public static class ScanPaths
         return full.TrimEnd('\\');
     }
 
+    /// <summary>Root paths ("C:\") of local fixed and removable drives that are ready.</summary>
+    public static IEnumerable<string> LocalDrives()
+    {
+        foreach (var d in DriveInfo.GetDrives())
+        {
+            bool ok;
+            try { ok = d.IsReady && d.DriveType is DriveType.Fixed or DriveType.Removable; }
+            catch (IOException) { ok = false; }
+            if (ok)
+                yield return d.RootDirectory.FullName;
+        }
+    }
+
+    /// <summary>True when the path exists as a folder, or is the all-drives target.</summary>
+    public static bool Exists(string path) => path == ScanTree.ComputerRoot || Directory.Exists(path);
+
     public static bool IsDriveRoot(string path)
     {
+        if (path.Trim().Equals(ScanTree.ComputerRoot, StringComparison.OrdinalIgnoreCase))
+            return false;
         string n = Normalize(path);
         return n.Length == 3 && n[1] == ':' && n[2] == '\\';
     }

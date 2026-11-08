@@ -31,6 +31,8 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <TextBlock Text="On disk" Style="{StaticResource Muted}" Margin="0,0,16,4" />
                         <TextBlock Grid.Column="1" Text="{Binding AllocatedText}" />
@@ -39,6 +41,10 @@
                         <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ContentsText}" TextWrapping="Wrap" />
                         <TextBlock Grid.Row="2" Text="Modified" Style="{StaticResource Muted}" Margin="0,0,16,4" />
                         <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding ModifiedText}" />
+                        <TextBlock Grid.Row="3" Text="Created" Style="{StaticResource Muted}" Margin="0,0,16,4" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding CreatedText}" />
+                        <TextBlock Grid.Row="4" Text="Accessed" Style="{StaticResource Muted}" Margin="0,0,16,4" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding AccessedText}" />
                     </Grid>
 
                     <Border Background="{DynamicResource SystemFillColorAttentionBackgroundBrush}" CornerRadius="6" Padding="10,8" Margin="0,0,0,12"

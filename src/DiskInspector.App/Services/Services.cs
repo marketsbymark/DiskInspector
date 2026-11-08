@@ -55,6 +55,9 @@ public static class Shell
     public static void Open(string path) =>
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = true })?.Dispose();
 
+    public static void OpenThisPc() =>
+        Process.Start(new ProcessStartInfo("explorer.exe", "shell:MyComputerFolder") { UseShellExecute = true })?.Dispose();
+
     public static void Reveal(string path)
     {
         if (ScanPaths.IsDriveRoot(path))

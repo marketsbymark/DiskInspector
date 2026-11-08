@@ -57,6 +57,46 @@ internal static unsafe partial class Native
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SetFilePointerEx(SafeFileHandle file, long distance, out long newPointer, uint moveMethod);
 
+    [LibraryImport("kernel32.dll", EntryPoint = "SetFileTime", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetFileTime(SafeFileHandle file, long* creation, long* lastAccess, long* lastWrite);
+
+    /// <summary>
+    /// Opens a file to read its contents without changing it: Windows is told not to update its last-access date,
+    /// and cloud placeholders are never downloaded (FILE_FLAG_OPEN_NO_RECALL). Returns null if it cannot be opened.
+    /// </summary>
+    public static FileStream? OpenForPeek(string path)
+    {
+        const uint GenericRead = 0x80000000, FileWriteAttributes = 0x100, ShareAll = 0x7, OpenExisting = 3, OpenNoRecall = 0x00100000;
+        string p = ToExtendedPath(path);
+        // Write-attributes access is only used to switch off the last-access update for this handle.
+        var h = CreateFile(p, GenericRead | FileWriteAttributes, ShareAll, 0, OpenExisting, OpenNoRecall, 0);
+        if (h.IsInvalid)
+        {
+            h.Dispose();
+            h = CreateFile(p, GenericRead, ShareAll, 0, OpenExisting, OpenNoRecall, 0);
+            if (h.IsInvalid)
+            {
+                h.Dispose();
+                return null;
+            }
+        }
+        else
+        {
+            long keep = -1;   // 0xFFFFFFFF/0xFFFFFFFF: "do not update the last-access time through this handle"
+            SetFileTime(h, null, &keep, null);
+        }
+        try
+        {
+            return new FileStream(h, FileAccess.Read, 1);
+        }
+        catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException)
+        {
+            h.Dispose();
+            return null;
+        }
+    }
+
     /// <summary>Adds the \\?\ prefix so Win32 calls accept paths longer than 260 characters.</summary>
     public static string ToExtendedPath(string path)
     {

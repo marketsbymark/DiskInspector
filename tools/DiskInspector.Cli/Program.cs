@@ -12,6 +12,28 @@ if (args.Length == 0)
     return 1;
 }
 
+if (args[0] == "--authors" && args.Length > 1)
+{
+    // DiskInspector.Cli --authors <folder> [max]: prints what the document reader finds, tab-separated.
+    int max = args.Length > 2 && int.TryParse(args[2], out int m) ? m : 200;
+    int shown = 0, withAuthor = 0;
+    var clock = Stopwatch.StartNew();
+    var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.Offline | (FileAttributes)0x400000 };
+    foreach (var file in Directory.EnumerateFiles(args[1], "*", options))
+    {
+        if (!DocumentProperties.CanRead(Path.GetExtension(file).TrimStart('.')))
+            continue;
+        var info = DocumentProperties.TryRead(file);
+        if (info?.Author is not null)
+            withAuthor++;
+        Console.WriteLine($"{file}\t{(info is null ? "(unreadable)" : info.Author)}\t{info?.LastSavedBy}\t{info?.Title}");
+        if (++shown >= max)
+            break;
+    }
+    Console.Error.WriteLine($"{shown} files, {withAuthor} with an author, {clock.ElapsedMilliseconds} ms");
+    return 0;
+}
+
 string target = args[0];
 bool fast = args.Contains("--fast");
 int ci = Array.IndexOf(args, "--compare");

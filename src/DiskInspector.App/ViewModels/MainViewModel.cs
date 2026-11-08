@@ -4,6 +4,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DiskInspector.App.Services;
+using DiskInspector.App.Views;
 using DiskInspector.Core.Analysis;
 using DiskInspector.Core.Model;
 using DiskInspector.Core.Scanning;
@@ -26,12 +27,14 @@ public sealed partial class MainViewModel : ObservableObject
     public MainViewModel()
     {
         Categorizer = Categorizer.Load(includeUserOverride: true);
+        Settings = AppSettings.Load();
         Folders = new FolderTreeViewModel(this);
         Types = new TypesViewModel(this);
         Categories = new CategoriesViewModel(this);
         Largest = new LargestFilesViewModel(this);
         Locations = new LocationsViewModel(this);
         Ages = new AgeViewModel(this);
+        WorkFiles = new WorkFilesViewModel(this);
         RefreshDrives();
     }
 
@@ -43,6 +46,8 @@ public sealed partial class MainViewModel : ObservableObject
     public LargestFilesViewModel Largest { get; }
     public LocationsViewModel Locations { get; }
     public AgeViewModel Ages { get; }
+    public WorkFilesViewModel WorkFiles { get; }
+    public AppSettings Settings { get; private set; }
     public bool IsElevated { get; } = Elevation.IsElevated();
     public string FastScanLabel => "Fast scan";
     public string WindowTitle => IsElevated ? "DiskInspector (Administrator)" : "DiskInspector";
@@ -51,21 +56,33 @@ public sealed partial class MainViewModel : ObservableObject
 
     public IReadOnlyList<NavItem> Views { get; } =
     [
-        new("Treemap", "\uF0E2", "Every file as a box sized by space"),
-        new("Sunburst", "\uEB05", "Folders as rings around the center"),
-        new("Folders", "\uE8B7", "Folder tree sorted by size"),
-        new("File types", "\uE8A5", "Space by file extension"),
-        new("Categories", "\uE8FD", "Space by kind of file"),
-        new("Locations", "\uE707", "Known places: Windows, programs, users"),
-        new("Largest files", "\uE8CB", "Biggest single files, with filters"),
-        new("Age", "\uE823", "Space by when files last changed"),
+        new("treemap", "Treemap", "\uF0E2", "Every file as a box sized by space"),
+        new("sunburst", "Sunburst", "\uEB05", "Folders as rings around the center"),
+        new("folders", "Folders", "\uE8B7", "Folder tree sorted by size"),
+        new("types", "File types", "\uE8A5", "Space by file extension"),
+        new("categories", "Categories", "\uE8FD", "Space by kind of file"),
+        new("work", "Work files", "\uE8F1", "Excel, Word, PowerPoint, PDF, email, Markdown, notebooks, Python, DBC files with dates and authors"),
+        new("locations", "Locations", "\uE707", "Known places: Windows, programs, users, OneDrive"),
+        new("largest", "Largest files", "\uE8CB", "Biggest single files, with filters"),
+        new("age", "Age", "\uE823", "Space by when files last changed"),
     ];
+
+    public string CurrentViewKey => SelectedViewIndex >= 0 && SelectedViewIndex < Views.Count ? Views[SelectedViewIndex].Key : "treemap";
+
+    /// <summary>Switches to a view by its key ("treemap", "work", ...).</summary>
+    public void ShowView(string key)
+    {
+        int i = Views.ToList().FindIndex(v => v.Key == key);
+        if (i >= 0)
+            SelectedViewIndex = i;
+    }
 
     // ---------- state ----------
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsStart), nameof(IsScanning), nameof(IsDone))]
-    [NotifyCanExecuteChangedFor(nameof(ScanCommand), nameof(FastScanCommand), nameof(CancelCommand), nameof(ExportCommand), nameof(NewScanCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ScanCommand), nameof(FastScanCommand), nameof(CancelCommand), nameof(ExportCommand), nameof(NewScanCommand),
+        nameof(SnapshotCommand), nameof(SnapshotAllWorkFilesCommand))]
     private AppState _state = AppState.Start;
 
     public bool IsStart => State == AppState.Start;
@@ -134,7 +151,8 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(OpenSelectedCommand), nameof(RevealSelectedCommand), nameof(CopySelectedPathCommand), nameof(ShowInTreemapCommand))]
+    [NotifyCanExecuteChangedFor(nameof(OpenSelectedCommand), nameof(RevealSelectedCommand), nameof(CopySelectedPathCommand), nameof(ShowInTreemapCommand),
+        nameof(ScopeToSelectionCommand), nameof(AnalyzeSelectedFolderCommand))]
     private int _selectedNode = -1;
 
     partial void OnSelectedNodeChanged(int value)
@@ -171,6 +189,208 @@ public sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private IReadOnlyList<Category> _legend = [];
+
+    // ---------- scope: everything, or one folder ----------
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsScoped), nameof(ScopeText))]
+    [NotifyCanExecuteChangedFor(nameof(ScopeToEverythingCommand))]
+    private int _scopeRoot;
+
+    /// <summary>Breakdowns for the current scope (null until a scan finishes).</summary>
+    public ScopeStats? Scope { get; private set; }
+
+    public bool IsScoped => ScopeRoot > 0;
+
+    public string ScopeText => Tree is { } t && ScopeRoot > 0 && ScopeRoot < t.Count ? t.GetFullPath(ScopeRoot) : "Everything scanned";
+
+    CancellationTokenSource? _scopeCts;
+
+    partial void OnScopeRootChanged(int value) => _ = ReloadScopeAsync();
+
+    async Task ReloadScopeAsync()
+    {
+        var a = _analysis;
+        if (a is null)
+            return;
+        _scopeCts?.Cancel();
+        var cts = _scopeCts = new CancellationTokenSource();
+        int root = ScopeRoot;
+        try
+        {
+            var stats = await Task.Run(() => a.ComputeScope(root, cts.Token), cts.Token);
+            if (cts.IsCancellationRequested || _analysis != a)
+                return;
+            Scope = stats;
+            Types.Load(a);
+            Categories.Load(a);
+            Largest.Recompute();
+            Ages.Load(a);
+            WorkFiles.RefreshGroups(keepSelection: true);
+            StatusText = root > 0 ? $"Showing file types, categories, largest files, age and work files for {ScopeText}" : StatusText;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    /// <summary>The folder for scoped views: the selection if it is a folder, else the folder holding it.</summary>
+    int SelectedFolder()
+    {
+        if (Tree is not { } t || SelectedNode < 0 || SelectedNode >= t.Count)
+            return -1;
+        return t.IsDirectory(SelectedNode) ? SelectedNode : t.Parent(SelectedNode);
+    }
+
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    void ScopeToSelection()
+    {
+        int folder = SelectedFolder();
+        if (folder >= 0)
+            ScopeRoot = folder;
+    }
+
+    [RelayCommand(CanExecute = nameof(IsScoped))]
+    void ScopeToEverything() => ScopeRoot = 0;
+
+    /// <summary>From the right-click menu: show the file types of the selected folder.</summary>
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    void AnalyzeSelectedFolder()
+    {
+        ScopeToSelection();
+        ShowView("types");
+    }
+
+    // ---------- snapshots ----------
+
+    [ObservableProperty]
+    private string? _lastSnapshot;
+
+    /// <summary>The table the current view is showing, or null.</summary>
+    TableSnapshot? CurrentSnapshot()
+    {
+        switch (CurrentViewKey)
+        {
+            case "treemap": return ChildrenSnapshot("Treemap", TreemapRoot);
+            case "sunburst": return ChildrenSnapshot("Sunburst", SunburstRoot);
+            case "folders": return Folders.Snapshot();
+            case "types": return Types.Snapshot();
+            case "categories": return Categories.Snapshot();
+            case "work": return WorkFiles.Snapshot();
+            case "locations": return Locations.Snapshot();
+            case "largest": return Largest.Snapshot();
+            case "age": return Ages.Snapshot();
+            default: return null;
+        }
+    }
+
+    /// <summary>What the treemap or sunburst shows: the items in its current folder.</summary>
+    TableSnapshot? ChildrenSnapshot(string view, int root)
+    {
+        var t = Tree;
+        var colors = Colors;
+        if (t is null || colors is null || root < 0 || root >= t.Count)
+            return null;
+        long total = Math.Max(1, t.GetSize(root, Metric));
+        var rows = t.GetChildrenSorted(root, Metric).Select(c => (IReadOnlyList<string>)
+        [
+            t.IsDirectory(c) ? t.Name(c) + "\\" : t.Name(c), t.GetFullPath(c), t.IsDirectory(c) ? "Folder" : "File",
+            colors.Categorizer.Categories[colors.CategoryOf(c)].Name, t.Size(c).ToString(), Format.Bytes(t.Size(c)), t.Allocated(c).ToString(),
+            Format.Percent((double)t.GetSize(c, Metric) / total), t.IsDirectory(c) ? t.FileCount(c).ToString() : "",
+            Snapshots.Date(t.CreatedUtc(c)), Snapshots.Date(t.ModifiedUtc(c)), Snapshots.Date(t.AccessedUtc(c)),
+        ]).ToList();
+        return new TableSnapshot(view, root == 0 ? "" : t.Name(root),
+            ["Name", "Path", "Kind", "Category (folders: mostly)", "Size (bytes)", "Size", "On disk (bytes)", "Share", "Files", "Created", "Modified", "Accessed"], rows);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanExport))]
+    void Snapshot()
+    {
+        try
+        {
+            var table = CurrentSnapshot();
+            if (table is null)
+            {
+                StatusText = "Nothing to snapshot in this view yet.";
+                return;
+            }
+            LastSnapshot = Snapshots.Write(Settings.SnapshotFolder, table, DateTime.Now);
+            StatusText = $"Snapshot saved ({table.Rows.Count:N0} rows): {LastSnapshot}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            Log.Error("Snapshot failed", ex);
+            StatusText = $"Snapshot failed: {ex.Message}. Check the snapshot folder in Settings.";
+        }
+    }
+
+    CancellationTokenSource? _batchCts;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SnapshotAllWorkFilesCommand))]
+    private bool _isBatchRunning;
+
+    bool CanSnapshotAll() => State == AppState.Done && !IsBatchRunning;
+
+    /// <summary>One CSV per work-file group (current scope) plus a summary, in a new timestamped folder.</summary>
+    [RelayCommand(CanExecute = nameof(CanSnapshotAll))]
+    async Task SnapshotAllWorkFiles()
+    {
+        var cts = _batchCts = new CancellationTokenSource();
+        IsBatchRunning = true;
+        try
+        {
+            var progress = new Progress<string>(m => StatusText = m);
+            string? folder = await WorkFiles.SnapshotAllGroupsAsync(progress, cts.Token);
+            if (folder is not null)
+            {
+                LastSnapshot = folder;
+                StatusText = $"Saved a snapshot of every work-file group to {folder}";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = "Snapshot of all work-file groups was cancelled.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            Log.Error("Snapshot of all groups failed", ex);
+            StatusText = $"Snapshot failed: {ex.Message}. Check the snapshot folder in Settings.";
+        }
+        finally
+        {
+            IsBatchRunning = false;
+        }
+    }
+
+    [RelayCommand]
+    void OpenSnapshotFolder()
+    {
+        Try("open the snapshot folder", () =>
+        {
+            Directory.CreateDirectory(Settings.SnapshotFolder);
+            if (LastSnapshot is { } last && File.Exists(last))
+                Shell.Reveal(last);
+            else
+                Shell.Open(Settings.SnapshotFolder);
+        });
+    }
+
+    [RelayCommand]
+    void OpenSettings()
+    {
+        var copy = Settings.Clone();
+        var window = new SettingsWindow { Owner = Application.Current.MainWindow, DataContext = copy };
+        if (window.ShowDialog() != true)
+            return;
+        string? error = copy.Save();
+        bool authorsTurnedOn = copy.ReadAuthors && !Settings.ReadAuthors;
+        Settings = copy;
+        OnPropertyChanged(nameof(Settings));
+        StatusText = error is null ? $"Settings saved. Snapshots go to {copy.SnapshotFolder}" : $"Settings could not be saved: {error}";
+        if (authorsTurnedOn && _analysis is not null)
+            WorkFiles.RefreshGroups(keepSelection: true);
+    }
 
     // ---------- treemap / sunburst navigation ----------
 
@@ -345,7 +565,7 @@ public sealed partial class MainViewModel : ObservableObject
         try
         {
             target = ScanPaths.Normalize(TargetPath);
-            if (!Directory.Exists(target))
+            if (!ScanPaths.Exists(target))
             {
                 MessageBox.Show($"The folder \"{TargetPath}\" was not found.", "DiskInspector", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
@@ -362,7 +582,7 @@ public sealed partial class MainViewModel : ObservableObject
         ReleaseMemory();
         State = AppState.Scanning;
         Notice = null;
-        ProgressHeadline = fast ? $"Reading the file table of {target}" : $"Scanning {target}";
+        ProgressHeadline = fast ? $"Reading the file table of {target}" : target == ScanTree.ComputerRoot ? "Scanning all drives" : $"Scanning {target}";
         ProgressDetail = "Starting…";
         ProgressPath = "";
         ProgressIndeterminate = !fast;
@@ -432,6 +652,9 @@ public sealed partial class MainViewModel : ObservableObject
     void ClearResults()
     {
         _analysis = null;
+        _scopeCts?.Cancel();
+        Scope = null;
+        ScopeRoot = 0;
         SelectedNode = -1;
         HoveredNode = -1;
         TreemapRoot = 0;
@@ -447,11 +670,13 @@ public sealed partial class MainViewModel : ObservableObject
         Largest.Load(null);
         Locations.Load(null);
         Ages.Load(null);
+        WorkFiles.Load(null);
     }
 
     void ApplyResults(Analysis a)
     {
         _analysis = a;
+        Scope = a.Everything;
         var r = a.Result;
         Result = r;
         Colors = a.Colors;
@@ -462,7 +687,9 @@ public sealed partial class MainViewModel : ObservableObject
         FillCrumbs(SunburstCrumbs, 0);
         Legend = a.Categories.Where(c => c.Size > 0).Select(c => c.Category).ToList();
         Issues = r.Issues;
-        Notice = r.Notice ?? (Categorizer.LoadError is { } err ? $"Your categories file was ignored: {err}" : null);
+        Notice = r.Notice
+                 ?? (Categorizer.LoadError is { } err ? $"Your categories file was ignored: {err}" : null)
+                 ?? (Core.Analysis.WorkFiles.LoadError is { } werr ? $"Your work-file groups file was ignored: {werr}" : null);
 
         Timed("folders", () => Folders.Load(a));
         Timed("types", () => Types.Load(a));
@@ -470,6 +697,7 @@ public sealed partial class MainViewModel : ObservableObject
         Timed("largest", () => Largest.Load(a));
         Timed("locations", () => Locations.Load(a));
         Timed("ages", () => Ages.Load(a));
+        Timed("work files", () => WorkFiles.Load(a));
         Timed("select", () => SelectedNode = ScanTree.RootId);
 
         var t = r.Tree;
@@ -523,11 +751,25 @@ public sealed partial class MainViewModel : ObservableObject
 
     bool CanOpenSelected() => HasSelection() && Shell.CanOpen(Tree!, SelectedNode);
 
+    bool IsComputerRootSelected => Tree is { IsComputerRoot: true } && SelectedNode == ScanTree.RootId;
+
     [RelayCommand(CanExecute = nameof(CanOpenSelected))]
-    void OpenSelected() => Try("open", () => Shell.Open(Tree!.GetFullPath(SelectedNode)));
+    void OpenSelected() => Try("open", () =>
+    {
+        if (IsComputerRootSelected)
+            Shell.OpenThisPc();
+        else
+            Shell.Open(Tree!.GetFullPath(SelectedNode));
+    });
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
-    void RevealSelected() => Try("show in Explorer", () => Shell.Reveal(Tree!.GetFullPath(SelectedNode)));
+    void RevealSelected() => Try("show in Explorer", () =>
+    {
+        if (IsComputerRootSelected)
+            Shell.OpenThisPc();
+        else
+            Shell.Reveal(Tree!.GetFullPath(SelectedNode));
+    });
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
     void CopySelectedPath()
@@ -542,7 +784,7 @@ public sealed partial class MainViewModel : ObservableObject
         var tree = Tree!;
         int node = SelectedNode;
         TreemapRoot = tree.IsDirectory(node) && tree.ChildCount(node) > 0 ? node : Math.Max(0, tree.Parent(node));
-        SelectedViewIndex = 0;
+        ShowView("treemap");
     }
 
     void Try(string what, Action action)

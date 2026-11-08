@@ -11,8 +11,9 @@ public sealed record CategoryStat(Category Category, long Count, long Size, long
 
 public static class FileTypeAnalysis
 {
-    /// <summary>One row per extension, largest total size first.</summary>
-    public static IReadOnlyList<ExtensionStat> ByExtension(ScanTree tree, Categorizer categorizer)
+    /// <summary>One row per extension, largest total size first, for the files below <paramref name="root"/>.</summary>
+    public static IReadOnlyList<ExtensionStat> ByExtension(ScanTree tree, Categorizer categorizer, int root = ScanTree.RootId,
+        CancellationToken ct = default)
     {
         int n = tree.Extensions.Count;
         var count = new long[n];
@@ -21,10 +22,10 @@ public static class FileTypeAnalysis
         var largest = new int[n];
         Array.Fill(largest, -1);
 
-        for (int i = 1; i < tree.Count; i++)
+        tree.VisitDescendants(root, i =>
         {
             if (tree.IsDirectory(i))
-                continue;
+                return;
             int e = tree.ExtensionId(i);
             count[e]++;
             long s = tree.Size(i);
@@ -32,7 +33,7 @@ public static class FileTypeAnalysis
             alloc[e] += tree.Allocated(i);
             if (largest[e] < 0 || s > tree.Size(largest[e]))
                 largest[e] = i;
-        }
+        }, ct);
 
         var map = categorizer.BuildExtensionMap(tree.Extensions);
         var list = new List<ExtensionStat>();

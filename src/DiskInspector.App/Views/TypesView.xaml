@@ -2,7 +2,10 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:DiskInspector.App.ViewModels"
-             xmlns:c="clr-namespace:DiskInspector.App.Controls">
+             xmlns:c="clr-namespace:DiskInspector.App.Controls"
+             xmlns:v="clr-namespace:DiskInspector.App.Views">
+    <DockPanel>
+    <v:ScopeBar DockPanel.Dock="Top" />
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="240" />
@@ -77,4 +80,5 @@
             </ListView.View>
         </ListView>
     </Grid>
+    </DockPanel>
 </UserControl>

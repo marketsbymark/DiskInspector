@@ -46,6 +46,8 @@ internal struct MftRecordInfo
     public long BaseRecord;          // 0 for a base record
     public bool HasStandardInfo;
     public long ModifiedFileTime;
+    public long CreatedFileTime;
+    public long AccessedFileTime;
     public uint Attributes;
     public bool HasData;
     public long DataSize;
@@ -162,7 +164,9 @@ internal static class NtfsFormat
                     if (TryResidentValue(attr, out var si) && si.Length >= 0x24)
                     {
                         info.HasStandardInfo = true;
+                        info.CreatedFileTime = I64(si, 0x00);
                         info.ModifiedFileTime = I64(si, 0x08);
+                        info.AccessedFileTime = I64(si, 0x18);
                         info.Attributes = U32(si, 0x20);
                     }
                     break;

@@ -91,46 +91,108 @@ public static class SelfTest
             }
             if (biggestDir >= 0)
             {
-                vm.SelectedViewIndex = 0;
+                vm.ShowView("treemap");
                 vm.TreemapRoot = biggestDir;
                 await Idle(2500);
                 Shot(window, outDir, "10-treemap-zoomed");
                 Note($"treemap zoomed to {tree.Name(biggestDir)}; crumbs={vm.TreemapCrumbs.Count}");
                 vm.SunburstRoot = biggestDir;
-                vm.SelectedViewIndex = 1;
+                vm.ShowView("sunburst");
                 await Idle(2000);
                 Shot(window, outDir, "11-sunburst-zoomed");
             }
             vm.UseAllocated = true;
-            vm.SelectedViewIndex = 2;
+            vm.ShowView("folders");
             await Idle(1200);
             Shot(window, outDir, "12-folders-on-disk");
             Note($"metric switched; folder rows={vm.Folders.Rows.Count}");
             vm.UseAllocated = false;
 
             vm.Largest.NameFilter = "log";
-            vm.SelectedViewIndex = 6;
+            vm.ShowView("largest");
             await Idle(2000);
             Shot(window, outDir, "13-largest-filtered");
             Note($"largest filter 'log': {vm.Largest.Summary}");
 
             vm.Categories.SelectedCategory = vm.Categories.Rows.FirstOrDefault(r => r.Name == "Video") ?? vm.Categories.Rows.LastOrDefault();
-            vm.SelectedViewIndex = 4;
+            vm.ShowView("categories");
             await Idle(1500);
             Shot(window, outDir, "14-categories-drill");
             Note($"category drill: {vm.Categories.FilesTitle} ({vm.Categories.Files.Count} files)");
 
+            // Work files: each group, one type on its own, authors, snapshots.
+            string snapDir = Path.Combine(outDir, "snapshots");
+            vm.Settings.SnapshotFolder = snapDir;   // not saved: the test never touches the user's settings file
+            vm.ShowView("work");
+            await WaitFor(() => vm.WorkFiles.Groups.Count > 0 && !vm.WorkFiles.IsBusy, 20000);
+            foreach (var g in vm.WorkFiles.Groups)
+            {
+                vm.WorkFiles.SelectedGroup = g;
+                await WaitFor(() => !vm.WorkFiles.IsBusy, 20000);
+                Note($"work files {g.Label}: {vm.WorkFiles.Summary}");
+            }
+            vm.WorkFiles.SelectedGroup = vm.WorkFiles.Groups.First(g => g.Group.Key == "excel");
+            await WaitFor(() => !vm.WorkFiles.IsBusy, 20000);
+            var xlsx = vm.WorkFiles.Types.FirstOrDefault(t => t.Extension == "xlsx");
+            if (xlsx is not null)
+            {
+                vm.WorkFiles.SelectedType = xlsx;
+                await WaitFor(() => !vm.WorkFiles.IsBusy, 20000);
+            }
+            await WaitFor(() => !vm.WorkFiles.IsReadingAuthors, 60000);
+            int withAuthor = vm.WorkFiles.Rows.Count(r => r.Author.Length > 0);
+            Note($"work files .xlsx: {vm.WorkFiles.Summary}; with author {withAuthor:N0}; {vm.WorkFiles.AuthorStatus}");
+            vm.WorkFiles.SortBy("Size", System.ComponentModel.ListSortDirection.Descending);
+            await Idle(1500);
+            Shot(window, outDir, "15-work-files");
+            vm.SnapshotCommand.Execute(null);
+            Note($"snapshot: {vm.StatusText}");
+            if (vm.LastSnapshot is null || !File.Exists(vm.LastSnapshot))
+                throw new InvalidOperationException("Snapshot file was not written");
+            int lines = File.ReadAllLines(vm.LastSnapshot).Length;
+            Note($"snapshot rows {lines - 1:N0} (table rows {vm.WorkFiles.Rows.Count:N0})");
+            if (lines - 1 != vm.WorkFiles.Rows.Count)
+                throw new InvalidOperationException("Snapshot row count does not match the table");
+
+            // Every view can be snapshotted.
+            foreach (var view in vm.Views)
+            {
+                vm.ShowView(view.Key);
+                await Idle(400);
+                vm.SnapshotCommand.Execute(null);
+                Note($"snapshot {view.Title}: {(vm.StatusText.StartsWith("Snapshot saved") ? "ok" : vm.StatusText)}");
+            }
+
+            // Scope to the user profile, then snapshot every work-file group.
+            int profile = tree.FindByPath(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+            if (profile > 0)
+            {
+                vm.SelectedNode = profile;
+                vm.ScopeToSelectionCommand.Execute(null);
+                await WaitFor(() => vm.Scope?.Root == profile && !vm.WorkFiles.IsBusy, 20000);
+                vm.ShowView("types");
+                await Idle(1500);
+                Shot(window, outDir, "16-types-scoped");
+                Note($"scoped to {vm.ScopeText}: {vm.Types.Rows.Count:N0} types, largest files {vm.Largest.Summary}");
+            }
+            await vm.SnapshotAllWorkFilesCommand.ExecuteAsync(null);
+            Note($"snapshot all groups: {vm.StatusText}");
+            if (vm.LastSnapshot is null || !Directory.Exists(vm.LastSnapshot) || Directory.GetFiles(vm.LastSnapshot, "*.csv").Length != vm.WorkFiles.GroupDefinitions.Count + 1)
+                throw new InvalidOperationException("Snapshot of all groups is incomplete");
+            vm.ScopeToEverythingCommand.Execute(null);
+            await WaitFor(() => vm.Scope?.Root == 0, 20000);
+
             if (!NoShots)
                 window.WindowState = WindowState.Maximized;
-            vm.SelectedViewIndex = 0;
+            vm.ShowView("treemap");
             await Idle(2500);
-            Shot(window, outDir, "15-treemap-maximized");
+            Shot(window, outDir, "17-treemap-maximized");
             if (!NoShots)
                 window.WindowState = WindowState.Normal;
             window.Width = 980;
             window.Height = 640;
             await Idle(2000);
-            Shot(window, outDir, "16-treemap-small");
+            Shot(window, outDir, "18-treemap-small");
 
             Note($"working set {Process.GetCurrentProcess().WorkingSet64 / (1024 * 1024)} MB, live managed heap {GC.GetTotalMemory(true) / (1024 * 1024)} MB");
 
@@ -158,9 +220,9 @@ public static class SelfTest
                 Note($"after folder scan, switch to {vm.Views[v].Title}: {sw.ElapsedMilliseconds} ms");
                 await Idle(300);
             }
-            vm.SelectedViewIndex = 5;
+            vm.ShowView("locations");
             await Idle(800);
-            Shot(window, outDir, "17-folder-scan-locations");
+            Shot(window, outDir, "19-folder-scan-locations");
             if (vm.State != AppState.Done)
                 throw new InvalidOperationException("Folder scan failed");
             vm.TargetPath = target;
@@ -175,6 +237,18 @@ public static class SelfTest
         {
             File.WriteAllLines(Path.Combine(outDir, "report.txt"), report);
             Application.Current.Shutdown();
+        }
+    }
+
+    static async Task WaitFor(Func<bool> condition, int timeoutMs)
+    {
+        var clock = Stopwatch.StartNew();
+        await Idle(200);
+        while (!condition())
+        {
+            if (clock.ElapsedMilliseconds > timeoutMs)
+                throw new TimeoutException("Timed out waiting for the UI");
+            await Idle(200);
         }
     }
 
@@ -216,16 +290,20 @@ public static class SelfTest
 
     struct RECT { public int Left, Top, Right, Bottom; }
 
-    /// <summary>Copies the window as it appears on screen (including the Mica backdrop) to a PNG.</summary>
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool PrintWindow(nint hwnd, nint hdc, uint flags);
+
     static bool NoShots;
 
+    /// <summary>
+    /// Saves the app window to a PNG. PrintWindow renders only this window, so whatever else is on the
+    /// screen (or covering the window) is never captured.
+    /// </summary>
     static void Shot(Window window, string outDir, string name)
     {
         if (NoShots)
             return;
         var hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
-        window.Activate();
-        SetForegroundWindow(hwnd);
         if (!GetWindowRect(hwnd, out var r))
             return;
         int w = r.Right - r.Left, h = r.Bottom - r.Top;
@@ -233,7 +311,7 @@ public static class SelfTest
         try
         {
             var old = SelectObject(mem, bmp);
-            BitBlt(mem, 0, 0, w, h, screen, r.Left, r.Top, 0x00CC0020 /* SRCCOPY */);
+            PrintWindow(hwnd, mem, 2 /* PW_RENDERFULLCONTENT */);
             SelectObject(mem, old);
             var src = System.Windows.Interop.Imaging.CreateBitmapSourceFromHBitmap(bmp, 0, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
             var enc = new PngBitmapEncoder();

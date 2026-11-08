@@ -31,23 +31,25 @@ public partial class MainWindow : Window
             ShowView(Vm.SelectedViewIndex);
     }
 
+    FrameworkElement CreateView(string key) => key switch
+    {
+        "sunburst" => new SunburstView(),
+        "folders" => new FoldersView { DataContext = Vm.Folders },
+        "types" => new TypesView { DataContext = Vm.Types },
+        "categories" => new CategoriesView { DataContext = Vm.Categories },
+        "work" => new WorkFilesView { DataContext = Vm.WorkFiles },
+        "locations" => new LocationsView { DataContext = Vm.Locations },
+        "largest" => new LargestFilesView { DataContext = Vm.Largest },
+        "age" => new AgeView { DataContext = Vm.Ages },
+        _ => new TreemapView(),
+    };
+
     /// <summary>Puts the selected view in the window, creating it the first time. Views are kept for later so they keep their state.</summary>
     void ShowView(int index)
     {
         if (!_views.TryGetValue(index, out var view))
         {
-            view = index switch
-            {
-                0 => new TreemapView(),
-                1 => new SunburstView(),
-                2 => new FoldersView { DataContext = Vm.Folders },
-                3 => new TypesView { DataContext = Vm.Types },
-                4 => new CategoriesView { DataContext = Vm.Categories },
-                5 => new LocationsView { DataContext = Vm.Locations },
-                6 => new LargestFilesView { DataContext = Vm.Largest },
-                7 => new AgeView { DataContext = Vm.Ages },
-                _ => new TreemapView(),
-            };
+            view = CreateView(index >= 0 && index < Vm.Views.Count ? Vm.Views[index].Key : "treemap");
             _views[index] = view;
         }
         ViewsHost.Content = view;

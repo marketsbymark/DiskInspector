@@ -4,25 +4,24 @@ namespace DiskInspector.Core.Analysis;
 
 public static class FileQueries
 {
-    /// <summary>The <paramref name="count"/> largest files matching <paramref name="filter"/>, largest first.</summary>
-    public static int[] Largest(ScanTree tree, int count, SizeMetric metric, Func<int, bool>? filter = null, CancellationToken ct = default)
+    /// <summary>The <paramref name="count"/> largest files below <paramref name="root"/> matching <paramref name="filter"/>, largest first.</summary>
+    public static int[] Largest(ScanTree tree, int count, SizeMetric metric, Func<int, bool>? filter = null, CancellationToken ct = default,
+        int root = ScanTree.RootId)
     {
         var heap = new PriorityQueue<int, long>(count + 1);
-        for (int i = 1; i < tree.Count; i++)
+        tree.VisitDescendants(root, i =>
         {
-            if ((i & 0xFFFF) == 0)
-                ct.ThrowIfCancellationRequested();
             if (tree.IsDirectory(i))
-                continue;
+                return;
             long s = tree.GetSize(i, metric);
             if (heap.Count == count && heap.TryPeek(out _, out long min) && s <= min)
-                continue;
+                return;
             if (filter is not null && !filter(i))
-                continue;
+                return;
             heap.Enqueue(i, s);
             if (heap.Count > count)
                 heap.Dequeue();
-        }
+        }, ct);
         var result = new int[heap.Count];
         for (int k = result.Length - 1; k >= 0; k--)
             result[k] = heap.Dequeue();
@@ -60,21 +59,21 @@ public static class AgeAnalysis
         return Ranges.Length - 1;
     }
 
-    public static IReadOnlyList<AgeBucket> Compute(ScanTree tree, DateTime nowUtc)
+    public static IReadOnlyList<AgeBucket> Compute(ScanTree tree, DateTime nowUtc, int root = ScanTree.RootId)
     {
         int n = Labels.Count;
         var count = new long[n];
         var size = new long[n];
         var alloc = new long[n];
-        for (int i = 1; i < tree.Count; i++)
+        tree.VisitDescendants(root, i =>
         {
             if (tree.IsDirectory(i))
-                continue;
+                return;
             int b = BucketOf(tree.ModifiedTicks(i), nowUtc);
             count[b]++;
             size[b] += tree.Size(i);
             alloc[b] += tree.Allocated(i);
-        }
+        });
         return [.. Enumerable.Range(0, n).Select(b => new AgeBucket(Labels[b], count[b], size[b], alloc[b]))];
     }
 }
